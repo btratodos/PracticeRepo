@@ -39,7 +39,7 @@ In order to use this document, you are required to agree to abide by the followi
 
 . This document may be changed, in whole or in part for personal use. Creation of secondary work using this document is allowed. However, “Reference document: Macchinetta Batch Framework Development Guideline” or equivalent documents may be mentioned in created document and its duplicate copies.
 
-. Document and its duplicate copies created according to Clause 2 may be provided to third party only if these are free of cost.
+. Document and its duplicate copies created according to Clause 2 may be provided to third party only if these are open source.
 
 . Use of this document and its duplicate copies, and transfer of rights of this contract to a third party, in whole or in part, beyond the conditions specified in this contract, are prohibited without the written consent of NTT.
 
