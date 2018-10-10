@@ -1,0 +1,81 @@
+@startuml
+
+hide footbox
+autonumber
+
+participant AsyncBatchDaemon
+participant JobRequestPollTask
+participant Job
+database "jobRequest" as JobRequest
+database "admin" as adminDB
+database "job" as jobDB
+
+
+AsyncBatchDaemon ->> JobRequestPollTask : schedule
+activate AsyncBatchDaemon
+activate JobRequestPollTask
+group JobRequestPollTask Transaction
+  JobRequestPollTask -> JobRequest : beginTransaction
+  JobRequestPollTask -> JobRequest : select
+  JobRequestPollTask -> JobRequest : commit
+end
+
+loop concurrent execute size
+    group JobRequestPollTask Transaction
+    JobRequestPollTask -> JobRequest : beginTransaction
+      JobRequestPollTask -> JobRequest : update (INIT->POLLED)
+      JobRequestPollTask -> JobRequest : commit
+    end
+
+    JobRequestPollTask -> Job : execute
+    activate Job #lightblue
+    group Spring Batch Transaction
+        Job -> adminDB : access (R/W)
+        Job -> jobDB : access (R/W)
+    end
+    Job --> JobRequestPollTask : job_execution_id
+    deactivate Job
+
+    group JobRequestPollTask Transaction
+      JobRequestPollTask -> JobRequest : beginTransaction
+      JobRequestPollTask -> JobRequest : update (POLLED->EXECUTED)
+      JobRequestPollTask -> JobRequest : commit
+    end
+end
+
+deactivate JobRequestPollTask
+deactivate AsyncBatchDaemon
+
+'Set styles such as format and color of each figure
+skinparam Note {
+  BackgroundColor #b1f8fa
+  BorderColor black
+}
+
+skinparam Class {
+  BorderColor black
+  ArrowColor black
+}
+
+skinparam Sequence {
+  BorderColor black
+  ActorBorderColor black
+  ArrowColor black
+  LifeLineBorderColor black
+  BoxLineColor black
+  ParticipantBorderColor black
+}
+
+skinparam componentStyle uml2
+
+skinparam Component {
+  BorderColor black
+  ArrowColor black
+}
+
+skinparam Interface {
+  BorderColor black
+  ArrowColor black
+}
+
+@enduml

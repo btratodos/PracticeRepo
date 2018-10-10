@@ -1,0 +1,605 @@
+include::_include_all.adoc[]
+
+[[Ch08_FlowControll]]
+= Flow control
+
+[[Ch08_FCh08_FlowControll_Overview]]
+== Overview
+
+It is a method of implementing a single business process by splitting one job to multiple jobs and combining them
+instead of implementing by integrating them in one job.
+The item wherein dependency relationship between jobs is defined, is called as job net.
+
+The advantages of defining a job net are enumerated below.
+
+* It is easier to visualize progress status of a process
+* It is possible to do partial re-execution,  pending execution and stop execution of jobs
+* It is easier to do parallel execution of jobs
+
+When designing a batch process, it is common to design the job net and the jobs together.
+
+[IMPORTANT]
+.Suitability of processing contents and job net
+====
+Job nets are often not suitable for simple business process that need not be split and the process for integrating with online process.
+====
+
+In this guideline, control of the flow of jobs between job nets is called flow control.
+In the processing flow, the previous job is called as preceding job and the next job is called as subsequent job.
+The dependency relationship between the preceding job and the subsequent job is called preceding and succeeding relationship.
+
+The conceptual diagram of flow control is shown below.
+
+.Overview of flow control
+image::Ch08_FlowControl_Overview.png[Flow Control Overview]
+
+As shown above, flow control can be implemented by both the job scheduler and {batch5_shortname}.
+However, it is desirable to use the job scheduler as much as possible due to the following reasons.
+
+.When implemented in {batch5_shortname}
+* There is a strong tendency to have diverse processes and status for one job making it easier to form a black box.
+* The boundary between the job scheduler and the job becomes ambiguous
+* It becomes difficult to see the situation at the time of error from the job scheduler
+
+However, it is generally known that there are following disadvantages when the number of jobs defined in the job scheduler increases.
+
+* The cost mentioned below increases and the processing time of the entire system increases due to the job scheduler
+** Job scheduler product specific communication, control of execution node, etc.
+** Overhead cost associated with Java process start for each job
+* Number of job registrations limit
+
+The policy is as follows.
+
+* Basically, flow control is performed by the job scheduler.
+* Following measures are taken only when any damage is caused due to the large number of jobs.
+** Multiple sequential processes are consolidated in one job in {batch5_shortname}.
+*** Simple preceding and succeeding relationships are only consolidated in one job.
+*** Changing the step exit code and conditional branch of executing subsequent step by it can be used functionally.
+However, because job execution management becomes complicated,
+it is used in principle only for the process exit code determination at the end of the job.
+
+[TIP]
+====
+Refer to <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, "Customization of exit code">> for the details of deciding job exit code.
+====
+
+The points to be considered for implementing preceding and succeeding process are shown below.
+
+.Difference between job scheduler and {batch5_shortname}
+
+.Flow control by job scheduler
+image::ch08/FlowControl/Ch08_FlowControl_Jobnet.png[Job net]
+
+.Points to be considered
+* Job scheduler starts java process through shell.
+* One job should correspond to one java process.
+** In the entire process, 4 java processes start.
+* The job scheduler controls the start order of each process. Each java process is independent.
+* The process exit code of the preceding job is used for deciding the start of the succeeding job.
+* External resources such as files, DB etc. should be used to pass the data between jobs.
+
+.Flow control by {batch5_shortname}
+image::ch08/FlowControl/Ch08_FlowControl_StepExecution.png[FlowControl]
+
+.Points to be considered
+* Job scheduler starts java process through shell.
+* One job should be one java process.
+** In the entire process, only one java process is used.
+* Start order of each step is controlled by one java process. Each step is independent.
+* The exit code of the preceding job is used for deciding the start of the succeeding job.
+* The data can be passed between steps by in-memory.
+
+How to implement flow control by {batch5_shortname} is explained below. +
+The flow control of job scheduler is strongly dependent on the product specifications so it is not explained here.
+
+[TIP]
+.Application example of flow control
+====
+In general, parallel/multiple processes of multiple jobs is often implemented by job scheduler and job net. +
+However, in {batch5_shortname}, how to implement parallel and multiple processes of multiple jobs by applying the flow control function, is explained.
+Refer to <<Ch08_ParallelAndMultiple.adoc#Ch08_ParallelAndMultiple, "Parallel and multiple process">> for details.
+====
+
+The usage method of this function is same in the chunk model as well as tasklet model.
+
+[[Ch08_FCh08_FlowControll_HowToUse]]
+== How to use
+How to use flow control in {batch5_shortname} is explained.
+
+[[Ch08_FCh08_FlowControll_HowToUse_SequencialFlow]]
+=== Sequential flow
+
+Sequential flow is a flow that links the before step and after step in series. +
+If any business process ends abnormally in a step of the sequential flow, the succeeding step is not executed and the job is interrupted.
+In this case, the step and job status and exit code associated with the job execution ID are
+recorded as ``FAILED`` by `` JobRepository``. +
+By restarting after recovering the cause of failure, it is possible to resume the process from the abnormally ended step.
+
+[TIP]
+====
+Refer to <<Ch06_ReProcessing.adoc#Ch06_RerunRestart_HowToUse_Restart, "Job restart">> for how to restart a job.
+====
+
+Set sequential flow of the job consisting of 3 steps.
+
+[source,xml]
+.Bean definition
+----
+<bean id="sequentialFlowTasklet"
+    class="org.terasoluna.batch.functionaltest.ch08.flowcontrol.SequentialFlowTasklet"
+        p:failExecutionStep="#{jobParameters['failExecutionStep']}" scope="step"/>
+
+<batch:step id="parentStep">
+    <batch:tasklet ref="sequentialFlowTasklet"
+                   transaction-manager="jobTransactionManager"/>
+</batch:step>
+
+<batch:job id="jobSequentialFlow" job-repository="jobRepository">
+    <batch:step id="jobSequentialFlow.step1"
+                next="jobSequentialFlow.step2" parent="parentStep"/> <!-- (1) -->
+    <batch:step id="jobSequentialFlow.step2"
+                next="jobSequentialFlow.step3" parent="parentStep"/> <!-- (1) -->
+    <batch:step id="jobSequentialFlow.step3" parent="parentStep"/>   <!-- (2) -->
+</batch:job>
+----
+
+[cols="10,90",options="header"]
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the next step to be started after this step ends normally in ``<batch:step>``. +
+Set ``id`` of the next step to ``next`` attribute.
+
+|(2)
+|``next`` attribute is not required in the step at the end of the flow.
+|===
+
+As a result, steps are started in series in the following order. +
+``jobSequentialFlow.step1`` -> ``jobSequentialFlow.step2`` -> ``jobSequentialFlow.step3`` +
+
+[NOTE]
+.How to define using <batch:flow>
+====
+In the above example, the flow is directly defined in `` <batch: job> ``.
+Flow definition can be defined outside using ``<batch:flow>``.
+An example of using ``<batch:flow>`` is shown below.
+
+[source,xml]
+----
+<batch:job id="jobSequentialOuterFlow" job-repository="jobRepository">
+    <batch:flow id="innerFlow" parent="outerFlow"/> <!-- (1) -->
+</batch:job>
+
+<!-- (2) -->
+<batch:flow id="outerFlow">
+    <batch:step id="jobSequentialOuterFlow.step1"
+                next="jobSequentialOuterFlow.step2"
+                parent="parentStep"/>
+    <batch:step id="jobSequentialOuterFlow.step2"
+                next="jobSequentialOuterFlow.step3"
+                parent="parentStep"/>
+    <batch:step id="jobSequentialOuterFlow.step3"
+                parent="parentStep"/>
+</batch:flow>
+----
+[cols="10,90",options="header"]
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set flow id is defined in (2) in the parent attribute.
+
+|(2)
+|Define sequential flow.
+|===
+
+====
+
+[[Ch08_FCh08_FlowControll_HowToUse_PassingDataToFutureSteps]]
+=== Passing data between steps
+
+In {SB}, ``ExecutionContext`` of execution context that can be used in the scope of each step and job is provided.
+By using the step execution context, data can be shared between the components in the step.
+At this time, since the step execution context cannot be shared between steps, the preceding step execution context cannot be referred from the succeeding step execution context.
+It can be implemented if the job execution context is used, but since it can be referred from all steps, it needsto be handled carefully.
+When the information between the steps needs to be inherited, it can be done by the following procedure.
+
+. In the post-processing of the preceding step, the information stored in the step execution context is passed to the job execution context.
+. The succeeding step gets information from the job execution context.
+
+By using ``ExecutionContextPromotionListener`` provided by {SB},
+the first procedure can be realized only by specifying the inherited information to the listener even without implementing it.
+
+[WARNING]
+.Notes on using ExecutionContext
+====
+`` ExecutionContext`` used for passing data is saved in serialized state in
+``BATCH_JOB_EXECUTION_CONTEXT`` and ``BATCH_JOB_STEP_EXECUTION_CONTEXT`` of RDBMS
+so note the following 3 points.
+
+. The passed data should be an object in a serializable format.
+  * ``java.io.Serializable`` should be implemented.
+. Minimum required passed data should be retained. +
+  `` ExecutionContext`` is also used for storing execution control information by {SB},
+   so larger the passed data, the more the serialization cost. +
+. The above `` ExecutionContextPromotionListener`` should be used for passed data without saving it directly in the job execution context. +
+  The job execution context has a wider scope than the step execution context, unnecessary serialized data gets easily accumulated.
+
+Also, it is possible to exchange information by sharing Bean of Singleton or Job scope rather than going through the execution context.
+Note that the larger the size of this method more the pressure on memory resources.
+====
+
+The data passed between steps is explained for the tasklet model and the chunk model respectively below.
+
+[[Ch08_FCh08_FlowControll_HowToUse_PassingDataToFutureSteps_Tasklet]]
+==== Data passing between steps using tasklet model
+In order to save and fetch passing data, get ``ExecutionContext`` from `` ChunkContext`` and pass the data between the steps.
+
+[source,java]
+.Implementation example of data passing source Tasklet
+----
+// package, imports are omitted.
+
+@Component
+public class SavePromotionalTasklet implements Tasklet {
+
+    // omitted.
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        // (1)
+        chunkContext.getStepContext().getStepExecution().getExecutionContext()
+                .put("promotion", "value1");
+
+        // omitted.
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[source,java]
+.Implementation example of data passing destination Tasklet
+----
+// package and imports are omitted.
+
+@Component
+public class ConfirmPromotionalTasklet implements Tasklet {
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) {
+        // (2)
+        Object promotion = chunkContext.getStepContext().getJobExecutionContext()
+                .get("promotion");
+
+        // omitted.
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[source,xml]
+.Description example of job Bean definition
+----
+<!-- import,annotation,component-scan definitions are omitted -->
+
+<batch:job id="jobPromotionalFlow" job-repository="jobRepository">
+    <batch:step id="jobPromotionalFlow.step1" next="jobPromotionalFlow.step2">
+        <batch:tasklet ref="savePromotionalTasklet"
+                       transaction-manager="jobTransactionManager"/>
+        <batch:listeners>
+            <batch:listener>
+                <!-- (3) -->
+                <bean class="org.springframework.batch.core.listener.ExecutionContextPromotionListener"
+                      p:keys="promotion"
+                      p:strict="true"/>
+            </batch:listener>
+        </batch:listeners>
+    </batch:step>
+    <batch:step id="jobPromotionalFlow.step2">
+        <batch:tasklet ref="confirmPromotionalTasklet"
+                       transaction-manager="jobTransactionManager"/>
+    </batch:step>
+</batch:job>
+<!-- omitted -->
+----
+
+[cols="10,90",options="header"]
+.Explanation of implementation contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set the value to be passed to the after step in the `` ExecutionContext`` of the step execution context.
+Here, `` promotion`` is specified as the key required for a series of data passing.
+
+|(2)
+|Get the passing data set in (1) of the preceding step using ``promotion`` key specified
+in the passing source from ``ExecutionContext``. +
+Note that the ``ExecutionContext`` used here is not the step execution context of (1) but
+is the job execution context.
+
+|(3)
+|Using ``ExecutionContextPromotionListener``,
+pass the data from the step execution context to the job execution context. +
+Specify the passing key specified in (1) to ``keys`` property. +
+``IllegalArgumentException`` is thrown by ``strict=true`` property when it does not exist in the step execution context.
+In case of `` false``, processing continues even if there is no passing data.
+|===
+
+[NOTE]
+.Regarding ExecutionContextPromotionListener and step exit code
+====
+``ExecutionContextPromotionListener`` passes the data from step execution context to job execution context
+only when the step exit code of data passing source ends normally (``COMPLETED``). +
+To customize the exit code in which the succeeding step is executed continuously,
+exit code should be specified in ``status`` property in the array format.
+====
+
+[[Ch08_FCh08_FlowControll_HowToUse_PassingDataToFutureSteps_Chunk]]
+==== Data passing between steps using the chunk model
+Use the method assigned with ``@AfterStep``、``@BeforeStep`` annotation in ``ItemProcessor``.
+The listener to be used for data passing and how to use `` ExecutionContext`` is the same as the tasklet model.
+
+[source,java]
+.Implementation example of data passing source ItemProcessor
+----
+// package and imports are omitted.
+
+@Component
+@Scope("step")
+public class PromotionSourceItemProcessor implements ItemProcessor<String, String> {
+
+    @Override
+    public String process(String item) {
+        // omitted.
+    }
+
+    @AfterStep
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        // (1)
+        stepExecution.getExecutionContext().put("promotion", "value2");
+        
+        return null;
+    }
+}
+----
+
+[source,java]
+.Implementation example of data passing target ItemProcessor
+----
+// package and imports are omitted.
+
+@Component
+@Scope("step")
+public class PromotionTargetItemProcessor implements ItemProcessor<String, String> {
+
+    @Override
+    public String process(String item) {
+        // omitted.
+    }
+
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        // (2)
+        Object promotion = stepExecution.getJobExecution().getExecutionContext()
+                .get("promotion");
+        // omitted.
+    }
+}
+----
+
+[source,xml]
+.Description example of job Bean definition
+----
+<!-- import,annotation,component-scan definitions are omitted -->
+<batch:job id="jobChunkPromotionalFlow" job-repository="jobRepository">
+    <batch:step id="jobChunkPromotionalFlow.step1" parent="sourceStep"
+                next="jobChunkPromotionalFlow.step2">
+        <batch:listeners>
+            <batch:listener>
+                <!-- (3) -->
+                <bean class="org.springframework.batch.core.listener.ExecutionContextPromotionListener"
+                      p:keys="promotion"
+                      p:strict="true" />
+            </batch:listener>
+        </batch:listeners>
+    </batch:step>
+    <batch:step id="jobChunkPromotionalFlow.step2" parent="targetStep"/>
+</batch:job>
+
+<!-- step definitions are omitted. -->
+----
+
+[cols="10,90",options="header"]
+.Explanation of implementation contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set the value to be passed to the succeeding step to ``ExecutionContext`` of step execution context.
+Here, `` promotion`` is specified as the key required for a series of data passing.
+
+|(2)
+|Get the passing data set in (1) of the preceding step using ``promotion`` key specified in the passing source
+from ``ExecutionContext``. +
+Note that the ``ExecutionContext`` used here is not the step execution context of (1) but
+is the job execution context.
+
+|(3)
+|Using ``ExecutionContextPromotionListener``,
+pass the data from the step execution context to the job execution context. +
+Specification of property is same as the tasklet.
+|===
+
+[[Ch08_FCh08_FlowControll_HowToExtend]]
+== How to extend
+
+Here, conditional branching of succeeding step and the condition to stop the job before executing the after step isexplained.
+
+[WARNING]
+.Difference between exit code and status of job and step.
+====
+In the following explanation, the terms "Status" and "Exit code" frequently appear. +
+When distinction cannot be made, it may cause confusion,
+so refer to <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode,"Customization of exit code>>.
+====
+
+[[Ch08_FCh08_FlowControll_HowToExtend_ConditionFlow]]
+=== Conditional branching
+
+The conditional branch means receiving the exit code which is the execution result of the preceding step, selecting one from multiple after steps and continuing execution. +
+To stop the job without executing any succeeding step, refer to <<Ch08_FCh08_FlowControll_StopConfig,"Stop condition">>.
+
+[source,xml]
+.Description example Job Bean definition
+----
+<batch:job id="jobConditionalFlow" job-repository="jobRepository">
+    <batch:step id="jobConditionalFlow.stepA" parent="conditionalFlow.parentStep">
+        <!-- (1) -->
+        <batch:next on="COMPLETED" to="jobConditionalFlow.stepB" />
+        <batch:next on="FAILED" to="jobConditionalFlow.stepC"/>
+    </batch:step>
+    <!-- (2) -->
+    <batch:step id="jobConditionalFlow.stepB" parent="conditionalFlow.parentStep"/>
+    <!-- (3) -->
+    <batch:step id="jobConditionalFlow.stepC" parent="conditionalFlow.parentStep"/>
+</batch:job>
+----
+
+[cols="10,90",options="header"]
+.Explanation of implementation contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Do not specify ``next`` attribute in the ``<batch:step>`` element as in the sequential flow.
+By setting multiple ``<batch:next>``, it can be assigned to the succeeding step specified by ``to`` attribute. +
+Specify exit code of the step  that is the transition condition, in ``on``.
+
+|(2)
+|It is the succeeding step executed only when the step exit code of (1) is ``COMPLETED``.
+
+|(3)
+|It is the succeeding step executed only when the step exit code of (1) is ``FAILED``. +
+By specifying this, succeeding step such as recovery process etc. is executed without stopping the job when the preceding stepprocess fails.
+
+|===
+
+[WARNING]
+.Notes on recovery process by after steps
+====
+When recovery process of the succeeding step is performed due to failure of preceding step process (Exit code is ``FAILED``),
+the status of before step changes to ``ABANDONED`` and it cannot restart regardless of success or failure of the recovery process.
+
+When the recovery process of the succeeding step fails, only the recovery process is re-executed on restarting the job. +
+For this reason, when processing is to be performed again including the preceding step, it is necessary to rerun as anotherjob execution.
+====
+
+[[Ch08_FCh08_FlowControll_StopConfig]]
+=== Stop condition
+
+How to stop the job depending on the exit code of the preceding step, is explained. +
+There are methods to specify the following 3 elements as means to stop.
+
+. ``end``
+. ``fail``
+. ``stop``
+
+If these exit codes correspond to the preceding step, the succeeding step is not executed. +
+Multiple exit codes can be specified within the same step.
+
+[source,xml]
+.Description example of job Bean definition
+----
+<batch:job id="jobStopFlow" job-repository="jobRepository">
+    <batch:step id="jobStopFlow.step1" parent="stopFlow.parentStep">
+        <!-- (1) -->
+        <batch:end on="END_WITH_NO_EXIT_CODE"/>
+        <batch:end on="END_WITH_EXIT_CODE" exit-code="COMPLETED_CUSTOM"/>
+        <!-- (2) -->
+        <batch:next on="*" to="jobStopFlow.step2"/>
+    </batch:step>
+    <batch:step id="jobStopFlow.step2" parent="stopFlow.parentStep">
+        <!-- (3) -->
+        <batch:fail on="FORCE_FAIL_WITH_NO_EXIT_CODE"/>
+        <batch:fail on="FORCE_FAIL_WITH_EXIT_CODE" exit-code="FAILED_CUSTOM"/>
+        <!-- (2) -->
+        <batch:next on="*" to="jobStopFlow.step3"/>
+    </batch:step>
+    <batch:step id="jobStopFlow.step3" parent="stopFlow.parentStep">
+        <!-- (4) -->
+        <batch:stop on="FORCE_STOP" restart="jobStopFlow.step4" exit-code=""/>
+        <!-- (2) -->
+        <batch:next on="*" to="jobStopFlow.step4"/>
+    </batch:step>
+    <batch:step id="jobStopFlow.step4" parent="stopFlow.parentStep"/>
+</batch:job>
+----
+
+[cols="10,90",options="header"]
+.Explanation of setting contents of job stop
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|When ``on`` attribute of ``<batch:end>`` and the step exit code match, the job is recorded as normal end
+(Status : ``COMPLETED``) in ``JobRepository``. +
+When ``exit-code`` attribute is assigned, exit code of job can be customized from ``COMPLETED`` by default.
+
+|(2)
+|By specifying wildcard (``*``) in ``on`` attribute of ``<batch:next>``, when it does not correspond to any of ``end``, ``fail``,
+``stop``, subsequent job can be continued. +
+It is described at the end of step elements however, since matching condition of exist code is evaluated before,
+the arrangement order of elements is optional if it is within step elements.
+
+|(3)
+|When ``<batch:fail>`` is used, the job is recorded as abnormal end (Status: ``FAILED``) in ``JobRepository``. +
+Like ``<batch:end>``, by assigning ``exit-code`` attribute, exit code of job can be customized from ``FAILED`` by default.
+
+|(4)
+|When ``<batch:stop>`` is used, the job is recorded as stopped (Status: ``STOPPED``) in ``JobRepository`` at the time ofnormal end of step. +
+For ``restart`` attribute, specify the stop where the job is resumed from stop at the time of restart. +
+Like ``<batch:end>``, ``exit-code`` attribute can be assigned, however, null string should be specified.(refer to column later)
+
+|===
+
+
+[IMPORTANT]
+.When customizing the exit code by the exit-code attribute, it should be mapped to the process exit code without omission.
+====
+Refer to <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode,"Customization of exit code">> for details.
+====
+
+[WARNING]
+.Empty charactor string should be specified to exit-code in <batch:stop>.
+====
+
+[source,xml]
+----
+<step id="step1" parent="s1">
+    <stop on="COMPLETED" restart="step2"/>
+</step>
+
+<step id="step2" parent="s2"/>
+----
+
+The expected flow control should be that when step1 ends normally, the job stops and step2 is executed when restart is executed again. +
+However, due to some failure in {SB}, the operation does not take place as expected. +
+step2 is not executed after restart, the exit code of job becomes ``NOOP`` and status ``COMPLETED``.
+
+To avoid this, "" (empty charactor string) should be assigned in ``exit-code`` as shown above.
+
+Refer to https://jira.spring.io/browse/BATCH-2315[{SB}/BATCH-2315] for the details of failure.
+====

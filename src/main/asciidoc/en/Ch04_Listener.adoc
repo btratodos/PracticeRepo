@@ -1,0 +1,526 @@
+include::_include_all.adoc[]
+
+[[Ch04_Listener]]
+= Listener
+
+[[Ch04_Listener_Overview]]
+== Overview
+A listener is an interface for inserting processing before and after executing a job or a step.
+
+Since this function works differently for chunk model and tasket model, respective explanations are given.
+
+A listener consists of multiple interfaces, respective roles are explained here.
+Subsequently, how to set and implement a listener is explained.
+
+[[Ch04_Listener_Overview_Types]]
+=== Types of listener
+A lot of listener interfaces are defined in {SB}.
+All will not be explained here, however we will focus on the interface with highest usage frequency.
+
+A listener is roughly divided into 2 types.
+
+JobListener::
+  An interface to insert the processing for execution of the job
+
+StepListener::
+  An interface to insert the processing for execution of the step
+
+
+[WARNING]
+.About JobListener
+====
+An interface called ``JobListener`` does not exist in {SB}.
+It is conveniently described in this guideline for the comparison with ``StepListener``. +
+Java Batch(jBatch) consists of an interface called ``javax.batch.api.listener.JobListener``, hence care should be taken at the time of implementation to avoid mistakes.
+Further, ``StepListener`` also consists of interface with same name but different signature (``javax.batch.api.listener.StepListener``), so it is necessary to take adequate precautions.
+====
+
+[[Ch04_Listener_Overview_Types_JobListener]]
+==== JobListener
+``JobListener`` interface consists of only one ``JobExecutionListener``.
+
+[[Ch04_Listener_Overview_Types_JobExecutionListener]]
+JobExecutionListener::
+  Process is inserted prior to starting a job and after terminating a job.
+
+[source,java]
+.JobExecutionListener interface
+----
+public interface JobExecutionListener {
+  void beforeJob(JobExecution jobExecution);
+  void afterJob(JobExecution jobExecution);
+}
+----
+
+[[Ch04_Listener_Overview_Types_StepListener]]
+==== StepListener
+``StepListener`` interface is of multiple types as below.
+
+StepListener::
+  Marker interfaces of various listeners will be introduced later.
+
+[[Ch04_Listener_Overview_Types_StepExecutionListener]]
+StepExecutionListener::
+  Process is inserted prior to starting a step and after terminating a job.
+
+[source,java]
+.StepExecutionListener interface
+----
+public interface StepExecutionListener extends StepListener {
+  void beforeStep(StepExecution stepExecution);
+  ExitStatus afterStep(StepExecution stepExecution);
+}
+----
+
+[[Ch04_Listener_Overview_Types_ChunkListener]]
+ChunkListener::
+  A process is inserted between before and after processing of one chunk and when an error occurs.
+
+[source,java]
+.ChunkListener interface
+----
+public interface ChunkListener extends StepListener {
+  static final String ROLLBACK_EXCEPTION_KEY = "sb_rollback_exception";
+  void beforeChunk(ChunkContext context);
+  void afterChunk(ChunkContext context);
+  void afterChunkError(ChunkContext context);
+}
+----
+
+[NOTE]
+.Uses of ROLLBACK_EXCEPTION_KEY
+====
+It is used when the exception occurred is to be fetched by ``afterChunkError`` method.
+If an error occurs during chunk process, {SB} uses ``sb_rollback_exception`` key in ``ChunkContext`` to call
+``ChunkListener`` after storing the exception which can be accessed as below.
+
+[source,java]
+.Usage example
+----
+public void afterChunkError(ChunkContext context) {
+    logger.error("Exception occurred while chunk. [context:{}]", context,
+            context.getAttribute(ChunkListener.ROLLBACK_EXCEPTION_KEY));
+}
+----
+====
+
+For exception handling, refer <<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_ChunkListener, Exception handling using ChunkListener interface>>
+
+[[Ch04_Listener_Overview_Types_ItemReadListener]]
+ItemReadListener::
+  Insert a process before and after fetching 1 data record by ItemReader and when an error occurs.
+
+[source,java]
+.ItemReadListener interface
+----
+public interface ItemReadListener<T> extends StepListener {
+  void beforeRead();
+  void afterRead(T item);
+  void onReadError(Exception ex);
+}
+----
+
+[[Ch04_Listener_Overview_Types_ItemProcessListener]]
+ItemProcessListener::
+  Insert a process before and after processing 1 data record by ItemProcessor and when an error occurs.
+
+[source,java]
+.ItemProcessListener interface
+----
+public interface ItemProcessListener<T, S> extends StepListener {
+  void beforeProcess(T item);
+  void afterProcess(T item, S result);
+  void onProcessError(T item, Exception e);
+}
+----
+
+[[Ch04_Listener_Overview_Types_ItemWriteListener]]
+ItemWriteListener::
+  Insert a process before and after output of 1 chunk by ItemWriter and when an error occurs.
+
+[source,java]
+.ItemWriteListener interface
+----
+public interface ItemWriteListener<S> extends StepListener {
+  void beforeWrite(List<? extends S> items);
+  void afterWrite(List<? extends S> items);
+  void onWriteError(Exception exception, List<? extends S> items);
+}
+----
+
+[NOTE]
+====
+This guideline does not explain following listeners.
+
+* Retry type listener
+* Skip type listener
+
+These listeners are intended to be used for exception handling, however, the policy of these
+guidelines is not to perform exception handling using these listeners.
+For details, refer <<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling,Exception handling>>.
+
+====
+
+[[Ch04_Listener_HowToUse]]
+== How to use
+Explanation is given about how to implement and set a listener.
+
+[[Ch04_Listener_HowToUse_Impl]]
+=== Implementation of a listener
+Explanation is given about how to implement and set a listener.
+
+. Implement the listener interface with ``implements``.
+. Implement components with method-based annotation.
+
+The type of implementation to use will be choosed on the role of the listener. Criteria will be described later.
+
+[[Ch04_Listener_HowToUse_WithoutAnnotation]]
+==== When an interface is to be implemented
+Various listener interfaces are implemented by using ``implements``. Multiple interfaces can be implemented at the same time based on requirement.
+Implementation example is shown below.
+
+[source,java]
+.Implementation example for JobExecutionListener
+----
+@Component
+public class JobExecutionLoggingListener implements JobExecutionListener { // (1)
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(JobExecutionLoggingListener.class);
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) { // (2)
+        logger.info("job started. [JobName:{}]", jobExecution.getJobInstance().getJobName());
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) { // (3)
+
+        logger.info("job finished.[JobName:{}][ExitStatus:{}]", jobExecution.getJobInstance().getJobName(),
+                jobExecution.getExitStatus().getExitCode());
+    }
+}
+----
+
+[source,xml]
+.Configuration example of listener
+----
+<batch:job id="chunkJobWithListener" job-repository="jobRepository">
+     <batch:step id="chunkJobWithListener.step01">
+         <batch:tasklet transaction-manager="jobTransactionManager">
+             <batch:chunk reader="reader" processor="processor"
+                          writer="writer" commit-interval="10"/>
+             <batch:listeners>
+                 <batch:listener ref="loggingEachProcessInStepListener"/>
+             </batch:listeners>
+         </batch:tasklet>
+     </batch:step>
+     <batch:listeners>
+         <batch:listener ref="jobExecutionLoggingListener"/> <!-- (4) -->
+     </batch:listeners>
+ </batch:job>
+----
+
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Implement ``JobExecutionListener`` using ``implements``.
+
+|(2)
+|Implement ``beforeJob`` method defined by ``JobExecutionListener``. +
+In this example, job start log is output.
+
+|(3)
+|Implement ``afterJob`` method defined by ``JobExecutionListener``. +
+In this example, job end log is output.
+
+|(4)
+|Set the listener implemented in (1), in ``<listeners>`` tag of Bean definition. +
+Details of setup method are explained in <<Ch04_Listener_HowToUse_Configuration>>.
+|===
+
+[NOTE]
+.Listener support class
+====
+When multiple listener interfaces are set to ``implements``, blank implementation is required to be done for the components which are not necessary for the process.
+Support classes wherein blank implementation is performed are provided in {SB} in order to simplify this operation.
+Please note that support classes may be used instead of interfaces, and ``extends`` is used instead of ``implements``.
+
+.Support class
+* ``org.springframework.batch.core.listener.ItemListenerSupport``
+* ``org.springframework.batch.core.listener.StepListenerSupport``
+====
+
+[[Ch04_Listener_HowToUse_WithAnnotation]]
+==== When annotations are assigned
+Annotations corresponding to various listener interfaces are assigned. Multiple annotations can also be implemented as required.
+
+[cols="40,40", options="header"]
+.Correspondence table with listener interface
+|===
+|Listener interface
+|Annotation
+
+|<<Ch04_Listener_Overview_Types_JobExecutionListener,JobExecutionListener>>
+|``@beforeJob`` +
+``@afterJob``
+
+|<<Ch04_Listener_Overview_Types_StepExecutionListener,StepExecutionListener>>
+|``@BeforeStep`` +
+``@AfterStep``
+
+|<<Ch04_Listener_Overview_Types_ChunkListener,ChunkListener>>
+|``@BeforeChunk`` +
+``@AfterChunk`` +
+``@afterChunkError``
+
+|<<Ch04_Listener_Overview_Types_ItemReadListener,ItemReadListener>>
+|``@BeforeRead`` +
+``@AfterRead`` +
+``@OnReadError``
+
+|<<Ch04_Listener_Overview_Types_ItemProcessListener,ItemProcessListener>>
+|``@beforeProcess`` +
+``@afterProcess`` +
+``@onProcessError``
+
+|<<Ch04_Listener_Overview_Types_ItemWriteListener,ItemWriteListener>>
+|``@BeforeWrite`` +
+``@AfterWrite`` +
+``@OnWriteError``
+
+|===
+
+These annotations work for the target scope by assigning them to the implementation method which is divided into components.
+Implementation example is given below.
+
+[source,java]
+.Implementation example for ItemProcessor wherein the annotation is assigned
+----
+@Component
+public class AnnotationAmountCheckProcessor implements
+        ItemProcessor<SalesPlanDetail, SalesPlanDetail> {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(AnnotationAmountCheckProcessor.class);
+
+    @Override
+    public SalesPlanDetail process(SalesPlanDetail item) throws Exception {
+        if (item.getAmount().signum() == -1) {
+            throw new IllegalArgumentException("amount is negative.");
+        }
+        return item;
+    }
+
+    // (1)
+    /*
+    @BeforeProcess
+    public void beforeProcess(Object item) {
+        logger.info("before process. [Item :{}]", item);
+    }
+    */
+
+    // (2)
+    @AfterProcess
+    public void afterProcess(Object item, Object result) {
+        logger.info("after process. [Result :{}]", result);
+    }
+
+    // (3)
+    @OnProcessError
+    public void onProcessError(Object item, Exception e) {
+        logger.error("on process error.", e);
+    }
+}
+
+----
+
+[source,xml]
+.Configuration example of listener
+----
+<batch:job id="chunkJobWithListenerAnnotation" job-repository="jobRepository">
+    <batch:step id="chunkJobWithListenerAnnotation.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader"
+                         processor="annotationAmountCheckProcessor"
+                         writer="writer" commit-interval="10"/>  <! -- (4) -->
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|When the annotation is to be used for implementation, only the annotations of the timing required for the processing should be assigned. +
+In this example, since no operation is required prior to processing of ItemProcess, the implementation wherein ``@beforeProcess`` is assigned, becomes unnecessary.
+
+|(2)
+|Implement the process to be performed after the processing of ItemProcess. +
+In this example, process results are output in a log.
+
+|(3)
+|Implement processing when an error occurs in ItemProcess. +
+Exception generated in this example is output in a log.
+
+|(4)
+|Set ItemProcess wherein the listener is implemented by using annotation in ``<chunk>`` tag. +
+Unlike listener interface, the listener is automatically registered even when it is not set in ``<listener>`` tag.
+
+|===
+
+[IMPORTANT]
+.Constraints for the method which assigns the annotations
+====
+Any method cannot be used as a method to assign the annotation.
+The signature must match with the method of corresponding listener interface.
+This point is clearly mentioned in javadoc of respective annotations.
+====
+
+
+[WARNING]
+.Precautions while implementing JobExecutionListener by an annotation
+====
+Since JobExecutionListener has a different scope than the other listeners, listener is not automatically registered in the configuration above.
+Hence, it is necessary to explicitly set in the ``<listener>`` tag. For details ,refer <<Ch04_Listener_HowToUse_Configuration>>.
+====
+
+[WARNING]
+.Implementation of a listener to Tasklet implementation by using annotation
+====
+When a listener is implemented in Tasklet implementation by using an annotation, Note that listener does not start with the following settings.
+
+[source,xml]
+.In case of Tasklet
+----
+<batch:job id="taskletJobWithListenerAnnotation" job-repository="jobRepository">
+    <batch:step id="taskletJobWithListenerAnnotation.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager"
+                       ref="annotationSalesPlanDetailRegisterTasklet"/>
+    </batch:step>
+</batch:job>
+----
+
+In case of Tasket model, the listener interface should be used in accordance with <<Ch04_Listener_HowToUse_SelectionCriteria>>.
+====
+
+[[Ch04_Listener_HowToUse_Configuration]]
+=== Listener settings
+Listeners are set by ``<listeners>``.``<listener>`` tag of Bean definition.
+Although it can be described at various locations by XML schema definition, some operations do not work as intended based on the type of interface.
+Set it to the following position.
+
+[source,xml]
+.Position where listener is set
+----
+<!-- for chunk mode -->
+<batch:job id="chunkJob" job-repository="jobRepository">
+    <batch:step id="chunkJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="(1)"
+                         processor="(1)"
+                         writer="(1)" commit-interval="10"/>
+            <batch:listeners>
+                <batch:listener ref="(2)"/>
+            </batch:listeners>
+        </batch:tasklet>
+    </batch:step>
+    <batch:listeners>
+        <batch:listener ref="(3)"/>
+    </batch:listeners>
+</batch:job>
+
+<!-- for tasklet mode -->
+<batch:job id="taskletJob" job-repository="jobRepository">
+    <batch:step id="taskletJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager" ref="tasklet">
+            <batch:listeners>
+                <batch:listener ref="(2)"/>
+            </batch:listeners>
+        </batch:tasklet>
+    </batch:step>
+    <batch:listeners>
+        <batch:listener ref="(3)"/>
+    </batch:listeners>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description of configuration value
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Set the component which includes the implementation attributing to <<Ch04_Listener_Overview_Types_StepListener>>, performed by using an annotation. +
+In case of an annotation, it will be inevitably set to this location.
+
+|(2)
+|Set listener interface implementation attributing to <<Ch04_Listener_Overview_Types_StepListener>>.
+In case of tasklet model, ``ItemReadListener``, ``ItemProcessListener`` and ``ItemWriteListener`` cannot be used.
+
+|(3)
+|Set listener attributing to <<Ch04_Listener_Overview_Types_JobListener>>. +
+Either of interface or annotations must be implemented here.
+
+|===
+
+
+==== Setting multiple listeners
+Multiple listeners can be set in ``<batch:listeners>`` tag.
+
+The sequence in which the listeners are started while registering multiple listeners is shown below.
+
+* ItemProcessListener implementation
+** listenerA, listenerB
+* JobExecutionListener implementation
+** listenerC, listenerD
+
+
+[source,xml]
+.Configuration example of multiple listeners
+----
+<batch:job id="chunkJob" job-repository="jobRepository">
+    <batch:step id="chunkJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader"
+                         processor="pocessor"
+                         writer="writer" commit-interval="10"/>
+            <batch:listeners>
+                <batch:listener ref="listenerA"/>
+                <batch:listener ref="listenerB"/>
+            </batch:listeners>
+        </batch:tasklet>
+    </batch:step>
+    <batch:listeners>
+        <batch:listener ref="listenerC"/>
+        <batch:listener ref="listenerD"/>
+    </batch:listeners>
+</batch:job>
+----
+
+.Listener startup sequence
+image::Ch04_Listener_composite.png[Listener execution order]
+
+* Processing corresponding to pre-processing is started in the sequence of listener registration.
+* Processing corresponding to post-processing or error processing is started in the reverse sequence of listener registration.
+
+[[Ch04_Listener_HowToUse_SelectionCriteria]]
+=== How to choose an interface or an annotation
+How to choose listener used a interface or listener used an annotation is explained.
+
+Listener interface::
+  It is used in case of cross-sectional processes which are shared across job, step and chunk.
+
+Annotation::
+  It is used when business logic specific process is to be performed. +
+  As a rule, it is implemented only for ItemProcessor.

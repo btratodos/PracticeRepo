@@ -1,0 +1,16 @@
+include::_include_all.adoc[]
+
+[[Ch09_JobCoding]]
+= Implementation of batch jobs
+
+. <<Ch09_DBAccessJob.adoc#, Job which performs data input and output by database access>>
+
+. <<Ch09_FileAccessJob.adoc#, Job which performs data input and output by file access>>
+
+. <<Ch09_ValidationJob.adoc#, Job that validates input data>>
+
+. <<Ch09_ExceptionHandlingWithListenerJob.adoc#, Job that performs exception handling by ChunkListener>>
+
+. <<Ch09_ExceptionHandlingWithTryCatchJob.adoc#, Job that performs exception handling by try-catch>>
+
+. <<Ch09_AsyncExecutionJob.adoc#, Asynchronous execution type job>>

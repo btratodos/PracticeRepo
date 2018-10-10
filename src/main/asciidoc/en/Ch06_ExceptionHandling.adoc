@@ -1,0 +1,1585 @@
+include::_include_all.adoc[]
+
+[[Ch06_ExceptionHandling]]
+= Exception handling
+
+[[Ch06_ExceptionHandling_Overview]]
+== Overview
+How to handle exception generated at the time of job execution is explained.
+
+Since this function has different usage for chunk model and tasklet model, each will be explained.
+
+First, classification of exceptions is explained, and handling method according to the type of exception is explained.
+
+[[Ch06_ExceptionHandling_Overview_Classification]]
+=== Classification of exception
+The exception generated at the time of job execution are classified into 3 types as below.
+
+[cols="5,30,35,30"]
+.Classification list of exceptions
+|===
+|Sr.No.
+|Classification
+|Description
+|<<Ch06_ExceptionHandling_Overview_Type>>
+
+|(1)
+|Exception that can be resolved the cause by job re-execution (parameters, change / modification of input data, etc.).
+|An exception that can resolve the cause by re-execution of a job that handles an exception with application code and performs exception handling.
+|<<Ch06_ExceptionHandling_Overview_Type_BusinessEx>> +
+<<Ch06_ExceptionHandling_Overview_Type_LibraryEx>>
+
+|(2)
+|Exception that can not be resolved by job re-execution.
+|Exceptions that can be resolved by job re-execution are handled with the following pattern.
+
+1. If exception can be caught in <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_StepListener,StepListener>>,
+handling exception with application code. +
+
+2. If exception cannot be caught in <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_StepListener,StepListener>>,
+handling exception in the framework.
+|<<Ch06_ExceptionHandling_Overview_Type_SystemEx>> +
+<<Ch06_ExceptionHandling_Overview_Type_UnexpectedSystemEx>> +
+<<Ch06_ExceptionHandling_Overview_Type_FatalErrors>>
+
+|(3)
+|(During asynchronous execution)Exception caused by illegal request for job request
+|Exception caused by illegal request of job request is handled in the framework and performs exception handling.
+
+icon:warning[] In case of <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,Asynchronous execution(DB polling)>>
+in the polling process, the validity of the job request is not verified.Therefore, it is desirable that the input check for the request is made in advance by the application that registers the job request.
+
+icon:warning[] In case of <<Ch04_AsyncJobWithWebContainer.adoc#Ch04_AsyncJobWithWeb,Asynchronous execution(Web container)>>
+It is assumed that the input check for the request is made in advance by the Web application.
+
+Therefore, exception handling is performed in an application that accepts requests or job requests.
+
+|<<Ch06_ExceptionHandling_Overview_Type_IllegalRequest>>
+|===
+
+[WARNING]
+.Avoid transaction processing within exception processing
+====
+When performing transactional processing such as writing to a database in exception processing,
+there is a possibility of causing a secondary exception.
+Exception processing should be based on output log analysis and end code setting.
+====
+
+[[Ch06_ExceptionHandling_Overview_Type]]
+=== Exception type
+Types of exceptions are explained.
+
+[[Ch06_ExceptionHandling_Overview_Type_BusinessEx]]
+==== Business exception
+A business exception is **an exception notifying that a violation of a business rule has been detected**. +
+This exception is generated within the logic of the step. +
+Since it is assumed to be an application state, it is not necessary to deal with the system operator.
+
+.Business exception example
+* In case of stock out at inventory reserve
+* When the number of days exceeds the scheduled date
+* etc ...
+
+[NOTE]
+.Applicable exception class
+====
+* ``java.lang.RuntimeException``and its subclass
+** It is recommended to create business exception classes by the user.
+====
+
+
+[[Ch06_ExceptionHandling_Overview_Type_LibraryEx]]
+==== Library exception occurring during normal operation
+A library exception that occurs during normal operation refers to **an exception that may occur when the system is operating normally**, among exceptions generated in the framework and library. +
+Exceptions raised in the framework and library are exception classes that occur in the Spring Framework and other libraries. +
+Since it is assumed to be an application state, it is not necessary to deal with the system operator.
+
+.Example of library exception that occurs during normal operation
+* Optimistic lock exception which occurs in <<Ch05_ExclusiveControl.adoc#Ch05_ExclusiveControl,exclusive control>> with online processing.
+* Unique constraint exception that occurs when registering the same data at same time from multiple jobs or online processing.
+* etc ...
+
+[NOTE]
+.Applicable exception class
+====
+* ``org.springframework.dao.EmptyResultDataAccessException`` (Exception that occurs when optimistic locking is done, when data update count is 0)
+* ``org.springframework.dao.DuplicateKeyException`` (Exception that occurs when a unique constraint violation occurs)
+* etc ...
+====
+
+[[Ch06_ExceptionHandling_Overview_Type_SystemEx]]
+==== System exception
+A system exception is **an exception  to notify that a state that should not occur is detected when the system is operating normally**. +
+This exception is generated within the logic of the step. +
+Action by the system operator is required.
+
+.Example of system exception
+* Master data, directory, file, etc. that should exist in advance do not exist.
+* When an exception classified as system abnormality is caught(IOException at file operation, etc.) among inspection exception occurring in the framework or library.
+* etc...
+
+[NOTE]
+.Applicable exception class
+====
+* ``java.lang.RuntimeException`` or its subclass
+** Creating a system exception class is recommended.
+====
+
+[[Ch06_ExceptionHandling_Overview_Type_UnexpectedSystemEx]]
+==== Unexpected system exception
+Unexpected system exceptions are **non-inspection exceptions that do not occur when the system is operating normally**.  +
+It is necessary for the system operator to deal with it or to analyze it by the system developer.
+
+Unexpected system exceptions will not be handled except by doing the following processing.
+If handled, throw the exception again.
+
+* Log capture exception for analysis and set the corresponding exit code.
+
+.Unexpected system exception example
+* Bugs are hidden in applications, frameworks, and libraries.
+* When the DB server is down.
+* etc...
+
+[NOTE]
+.Applicable exception class
+====
+* ``java.lang.NullPointerException`` (Exception caused by a bug)
+* ``org.springframework.dao.DataAccessResourceFailureException``(Exception raised when the DB server is down)
+* etc ...
+====
+
+[[Ch06_ExceptionHandling_Overview_Type_FatalErrors]]
+==== Fatal error
+A fatal error is an error **that notifies that a fatal problem has occurred that affects the entire system (application)**. +
+It is necessary for system operator or system developer to cope with it and recover.
+
+Fatal errors are not handled except for the following processing.If handled, throw the exception again.
+
+* Log capture exception for analysis and set the corresponding exit code.
+
+.Fatal error example
+* When memory available for Java virtual machine is insufficient.
+* etc...
+
+[NOTE]
+.Applicable exception class
+====
+* Classes that inherit``java.lang.Error``.
+** java.lang.OutOfMemoryError (Error occurred when memory is insufficient)etc
+* etc ...
+====
+
+[[Ch06_ExceptionHandling_Overview_Type_IllegalRequest]]
+==== Invalid job request error
+Job request invalid error is an error **to notify that a problem has occurred in the request for job request during asynchronous execution**. +
+It is necessary for the system operator to cope with and recover from it.
+
+Job request incorrect error is based on exception handling in the application processing the request of job request,
+It is not explained in this guideline.
+
+[[Ch06_ExceptionHandling_Overview_Deal]]
+=== How to handle exceptions
+How to handle exceptions is explained.
+
+The exception handling pattern is as follows.
+
+. Decide whether to continue the job when an exception occurs (3 types)
+. Decide how to re-execute the suspended job (2 types)
+
+[cols="10,25,65", options="header"]
+.How to decide whether to continue the job
+|===
+
+|Sr.No.
+|How to handle exceptions
+|Description
+
+|(1)
+|<<Ch06_ExceptionHandling_Overview_Deal_Skip>>
+|Skip error record and continue processing.
+
+|(2)
+|<<Ch06_ExceptionHandling_Overview_Deal_Retry>>
+|Reprocess the error record until the specified condition (number of times, time etc.) is reached.
+
+|(3)
+|<<Ch06_ExceptionHandling_Overview_Deal_Interruption>>
+|Processing is interrupted.
+|===
+
+[NOTE]
+====
+Even if an exception has not occurred, the job may stop while processing because the job has exceeded the expected processing time. +
+In this case, please refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement_JobStop,Stopping a job>>.
+====
+
+[cols="10,25,65", options="header"]
+.How to re-execute the suspended job
+|===
+|Sr.No.
+|How to handle exceptions
+|Description
+
+|(1)
+|<<Ch06_ReProcessing.adoc#Ch06_RerunRestart_HowToUse_Rerun,Job rerun>>
+|Re-execute the suspended job from the beginning.
+
+|(2)
+|<<Ch06_ReProcessing.adoc#Ch06_RerunRestart_HowToUse_Restart,Job restart>>
+|Re-execute the interrupted job from the point where it was interrupted.
+|===
+
+For details, please refer how to re-execute the suspended job <<Ch06_ReProcessing.adoc#Ch06_RerunRestart,Rerun processing>>.
+
+
+[[Ch06_ExceptionHandling_Overview_Deal_Skip]]
+==== Skip
+Skipping is a method of skipping error data without stopping batch processing and continuing processing.
+
+.Skipping example
+* Invalid record exists in input data
+* When a business exception occurs
+* etc ...
+
+[IMPORTANT]
+.Reprocess skip record
+====
+When skipping, design how to deal with skipped invalid records.
+In the case of extracting and reprocessing an invalid record, a case like processing it is included at the time of the next execution,can be considered.
+====
+
+[[Ch06_ExceptionHandling_Overview_Deal_Retry]]
+==== Retry
+Retrying is a method of repeatedly attempting until a specified number of times or time is reached for a record that failed a specific process. +
+It is used only when the cause of processing failure depends on the execution environment and it is expected to be resolved over time.
+
+.Example of retrying
+* When the record to be processed is locked by exclusive control
+* When message transmission fails due to instantaneous interruption of network
+* etc ...
+
+[IMPORTANT]
+.Application of retry
+====
+If the retry is applied in every scene, the processing time unnecessarily increases at the time of occurrence of an abnormality, there is a risk that the detection of the abnormality will be delayed +
+Therefore, it is desirable to apply the retry to only a part of the process,
+It is advisable to limit the target to those that are less reliable such as external system cooperation.
+====
+
+[[Ch06_ExceptionHandling_Overview_Deal_Interruption]]
+==== Process interruption
+Process interruption is literally a method of interrupting processing midway. +
+It is used when processing cannot be continued on detecting an erroneous content or when there is requirement which does not allow skipping of records.
+
+.Examples of processing interruption
+* Invalid record exists in input data
+* When a business exception occurs
+* etc ...
+
+[[Ch06_ExceptionHandling_HowToUse]]
+== How to use
+How to implement exception handling is explained.
+
+A log is the main user interface for batch application operation.Therefore, monitoring of exception occurred will also be done through the log.
+
+In {SB}, if an exception occurs during step execution, the log is output and abnormally terminated, so there is a possibility that the requirement can be satisfied without additional implementation by the user.
+The following explanation should be implemented pinpoint only when it is necessary for the user to output logs according to the system.
+Basically there are no case where all processing must be implemented.
+
+For common log setting of exception handling, please refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_Logging,Logging>>.
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Step]]
+=== Step unit exception handling
+Exception handling method in step units is explained.
+
+
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_ChunkListener>>::
+  If you want to handle exceptions uniquely regardless of the processing model,
+  use <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ChunkListener,ChunkListener>> interface. +
+  Although it can be implemented by using a step or job listener which is wider in scope than chunk
+  Adopt ``ChunkListener`` emphasizing in  handling it immediately as soon as possible after occurrence.
+
+The exception handling method for each processing model is as follows.
+
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk>>::
+  Implement the function using various Listener interfaces provided by {SB}.
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet>>::
+  Implement exception handling independently within tasklet implementation.
+
+[IMPORTANT]
+.Why unified handling possible with ChunkListener.
+====
+A sense of incompatibility might be felt with ``ChunkListener`` being able to handle exceptions occurring within tasklet implementation.
+This is because in {SB}, execution of business logic is considered based on chunk,
+since one tasklet execution is handled as one chunk processing.
+
+This point also appears in ``org.springframework.batch.core.step.tasklet.Tasklet`` interface.
+
+[source,java]
+----
+public interface Tasklet {
+  RepeatStatus execute(StepContribution contribution,
+          ChunkContext chunkContext) throws Exception;
+}
+----
+
+====
+
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_ChunkListener]]
+==== Exception handling with ChunkListener interface
+Implement ``afterChunkError`` method of <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ChunkListener,ChunkListener>> interface. +
+Get error information from ``ChunkContext`` argument of ``afterChunkError`` method  using ``ChunkListener.ROLLBACK_EXCEPTION_KEY``as a key.
+
+For details on how to set the listener,please refer <<Ch04_Listener.adoc#Ch04_Listener_HowToUse_Configuration,Listerner setting>>.
+
+[source,java]
+.Implementation example of ChunkListener
+----
+@Component
+public class ChunkAroundListener implements ChunkListener {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(ChunkAroundListener.class);
+
+    @Override
+    public void beforeChunk(ChunkContext context) {
+        logger.info("before chunk. [context:{}]", context);
+    }
+
+    @Override
+    public void afterChunk(ChunkContext context) {
+        logger.info("after chunk. [context:{}]", context);
+    }
+
+    // (1)
+    @Override
+    public void afterChunkError(ChunkContext context) {
+        logger.error("Exception occurred while chunk. [context:{}]", context,
+                context.getAttribute(ChunkListener.ROLLBACK_EXCEPTION_KEY)); // (2)
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``afterChunkError`` method.
+
+|(2)
+|Get error information from ``ChunkContext`` using ``ChunkListener.ROLLBACK_EXCEPTION_KEY`` as a key. +
+In this example, the stack trace of the acquired exception is logged.
+|===
+
+[WARNING]
+.Difference in behavior of ChunkListener due to difference in processing model
+====
+In the chunk model, handling is not performed with the afterChunkError method because exceptions caused by opening / closing resources are outside the scope captured by the ChunkListener interface.
+A schematic diagram is shown below.
+
+.Schematic diagram of exception handling in chunk model
+image::Ch06_ExceptionHandling_DiffTimingOpenResourceByChunkModel.png[Difference in resource open timing by chunk model]
+
+
+In the tasklet model, exceptions caused by opening and closing resources are handled by the afterChunkError method because they are within the scope captured by the ChunkListener interface.
+A schematic diagram is shown below.
+
+.Schematic diagram of exception handling in the tasklet model
+image::Ch06_ExceptionHandling_DiffTimingOpenResourceByTaskletModel.png[Difference in resource open timing by tasklet model]
+
+If you wish to handle exceptions unifiedly by absorbing this behavior difference,
+it can be implemented by checking the occurrence of an exception in the <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_StepExecutionListener,StepExecutionListener>> interface.
+However, the implementation is slightly more complicated than ``ChunkListener``.
+
+[source,java]
+.Example of StepExecutionListener implementation.
+----
+@Component
+public class StepErrorLoggingListener implements StepExecutionListener {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(StepErrorLoggingListener.class);
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        // do nothing.
+    }
+
+    // (1)
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        // (2)
+        List<Throwable> exceptions = stepExecution.getFailureExceptions();
+        // (3)
+        if (exceptions.isEmpty()) {
+            return ExitStatus.COMPLETED;
+        }
+
+        // (4)
+        logger.info("This step has occurred some exceptions as follow. " +
+                "[step-name:{}] [size:{}]",
+                stepExecution.getStepName(), exceptions.size());
+        for (Throwable th : exceptions) {
+            logger.error("exception has occurred in job.", th);
+        }
+        return ExitStatus.FAILED;
+    }
+
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``afterStep`` method.
+
+|(2)
+|Get error information from the ``stepExecution`` argument.Be aware that you need to handle multiple exceptions together.
+
+|(3)
+|there is no error information, it is determined as normal termination.
+
+|(4)
+|If there is error information, exception handling is performed. +
+In this example, log output with stack trace is done for all exceptions that has occurred.
+
+|===
+
+====
+
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk]]
+==== Exception handling in chunk model
+In the chunk model,
+exception handling with an inherited Listener <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_StepListener,StepListener>>.
+
+For details on how to set listener, please refer <<Ch04_Listener.adoc#Ch04_Listener_HowToUse_Configuration,Listner setting>>.
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemReader]]
+===== Coding point(ItemReader)
+By implementing ``onReadError`` method of <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ItemReadListener,ItemReadListener>> interface,
+exceptions raised within ItemReader are handled.
+
+[source, java]
+.Implementation example of ItemReadListener#onReadError
+----
+@Component
+public class CommonItemReadListener implements ItemReadListener<Object> {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(CommonItemReadListener.class);
+
+    // omitted.
+
+    // (1)
+    @Override
+    public void onReadError(Exception ex) {
+        logger.error("Exception occurred while reading.", ex);  // (2)
+    }
+
+    // omitted.
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``onReadError`` method.
+
+|(2)
+|Implement exception handling.  +
+In this example, the stack trace of the exception acquired from the argument is logged.
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor]]
+===== Coding point (ItemProcessor)
+There are two ways to handle exception in ItemProcessor, and use it according to requirements.
+
+. How to try ~ catch in ItemProcessor
+. Using <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ItemProcessListener,ItemProcessListener>> interface.
+
+Why they are used properly is explained. +
+The argument of the ``onProcessError`` method executed when an exception occurs in ItemProcessor processing has two items, processing item and exception. +
+Depending on the requirements of the system, when handling exceptions such as log output in the ``ItemProcessListener`` interface, these two arguments may not satisfy the requirement.
+In that case, it is recommended to catch the exception with try ~ catch in ItemProcessor and perform exception handling processing. +
+Note that implementing try ~ catch in ItemProcessor and implementing the ``ItemProcessListener`` interface may result in double processing, so care must be taken +
+If fine-grained exception handling is to be done, then adopt a method to try ~ catch in ItemProcessor.
+
+Each method is explained.
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor_TryCatchExample]]
+How to try ~ catch in ItemProcessor::
+  This is used to do fine-grained exception handling. +
+  As explained in the skip section below,it will be used when doing error record of <<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip,Skip>>.
+
+[source, java]
+.Implementation example of try ~ catch in ItemProcessor
+----
+@Component
+public class AmountCheckProcessor implements
+        ItemProcessor<SalesPerformanceDetail, SalesPerformanceDetail> {
+
+    // omitted.
+
+    @Override
+    public SalesPerformanceDetail process(SalesPerformanceDetail item)
+            throws Exception {
+        // (1)
+        try {
+            checkAmount(item.getAmount(), amountLimit);
+        } catch (ArithmeticException ae) {
+            // (2)
+            logger.error(
+                "Exception occurred while processing. [item:{}]", item, ae);
+            // (3)
+            throw new IllegalStateException("check error at processor.", ae);
+        }
+        return item;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``try～catch``.Here special handling is only for certain exceptions (``ArithmeticException``).
+
+|(2)
+|Implement exception handling. +
+In this example, the stack trace of the exception acquired from the argument is logged.
+
+|(3)
+|Throw a transaction rollback exception. +
+This exception throw also allows common exception handling with ``ItemProcessListener``.
+
+|===
+
+
+How to use the ``ItemProcessListener`` interface::
+  Use this,if business exceptions can be handled in the same way.
+
+[source, java]
+.Implemenation example of ItemProcessListener#onProcessError
+----
+@Component
+public class CommonItemProcessListener implements ItemProcessListener<Object, Object> {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(CommonItemProcessListener.class);
+
+    // omitted.
+
+    // (1)
+    @Override
+    public void onProcessError(Object item, Exception e) {
+        // (2)
+        logger.error("Exception occurred while processing. [item:{}]", item, e);
+    }
+
+    // omitted.
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``onProcessError`` method.
+
+|(2)
+|Implement exception handling. +
+In this example, the processing target data acquired from the arguments and the stack trace of the exception are logged.
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemWriter]]
+===== Coding point(ItemWriter)
+By implementing the ``onWriteError`` method of <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ItemWriteListener,ItemWriteListener>> interface
+exceptions raised within ItemWriter are handled.
+
+[source, java]
+.Implementation example of ItemWriteListener#onWriteError
+----
+@Component
+public class CommonItemWriteListener implements ItemWriteListener<Object> {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(CommonItemWriteListener.class);
+
+    // omitted.
+
+    // (1)
+    @Override
+    public void onWriteError(Exception ex, List item) {
+        // (2)
+        logger.error("Exception occurred while processing. [items:{}]", item, ex);
+    }
+
+    // omitted.
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``onWriteError`` method.
+
+|(2)
+|Implement exception handling. +
+In this example, the chunk of the output target obtained from the argument and the stack trace of the exception are logged.
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet]]
+==== Exception handling in tasklet model
+Implement exception handling of tasklet model on its own in tasklet.
+
+When performing transaction processing, be sure to throw the exception again in order to roll back.
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet_TaskletExample]]
+[source,java]
+.Exception handling implementation example in tasklet model
+----
+@Component
+public class SalesPerformanceTasklet implements Tasklet {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(SalesPerformanceTasklet.class);
+
+    // omitted.
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        // (1)
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution()
+                    .getExecutionContext());
+
+            List<SalesPerformanceDetail> items = new ArrayList<>(10);
+            SalesPerformanceDetail item = null;
+            do {
+                // Pseudo operation of ItemReader
+                // omitted.
+
+                // Pseudo operation of ItemProcessor
+                checkAmount(item.getAmount(), amountLimit);
+
+
+                // Pseudo operation of ItemWriter
+                // omitted.
+
+            } while (item != null);
+        } catch (Exception e) {
+            logger.error("exception in tasklet.", e);   // (2)
+            throw e;    // (3)
+        } finally {
+            try {
+                reader.close();
+            } catch (Exception e) {
+                // do nothing.
+            }
+        }
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+.Exception handling example in tasklet model
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``try-catch``
+
+|(2)
+|Implement exception handling. +
+In this example, the stack trace of the exception that occurred is logged.
+
+|(3)
+|Throw the exception again to roll back the transaction.
+
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Job]]
+=== Job-level exception handling
+Exception handling method on a job level is explained. +
+It is a common handling method for chunk model and tasklet model.
+
+Implement errors such as system exception and fatal error etc. in job level
+<<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_JobExecutionListener,JobExecutionListener>> interface.
+
+In order to collectively define exception handling processing, handling is performed on a job level without defining handling processing for each step. +
+In the exception handling here, do output log and setting ExitCode, do not implement transaction processing.
+
+[CAUTION]
+.Prohibition of transaction processing
+====
+The processing performed by ``JobExecutionListener`` is out of the scope of business transaction management.
+Therefore, it is prohibited to execute transaction processing in exception handling on a job level.
+====
+
+Here, an example of handling an exception when occurs in ItemProcessor is shown.
+For details on how to set the listener,please refer <<Ch04_Listener.adoc#Ch04_Listener_HowToUse_Configuration,Listner setting>>.
+
+[source, java]
+.Implementation example of ItemProcessor
+----
+@Component
+public class AmountCheckProcessor implements
+        ItemProcessor<SalesPerformanceDetail, SalesPerformanceDetail> {
+
+    // omitted.
+
+    private StepExecution stepExecution;
+
+    // (1)
+    @BeforeStep
+    public void beforeStep(StepExecution stepExecution) {
+        this.stepExecution = stepExecution;
+    }
+
+    @Override
+    public SalesPerformanceDetail process(SalesPerformanceDetail item)
+            throws Exception {
+        // (2)
+        try {
+            checkAmount(item.getAmount(), amountLimit);
+        } catch (ArithmeticException ae) {
+            // (3)
+            stepExecution.getExecutionContext().put("ERROR_ITEM", item);
+            // (4)
+            throw new IllegalStateException("check error at processor.", ae);
+        }
+        return item;
+    }
+}
+----
+
+[source, java]
+.Exception handling implementation in JobExecutionListener
+----
+@Component
+public class JobErrorLoggingListener implements JobExecutionListener {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(JobErrorLoggingListener.class);
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        // do nothing.
+    }
+
+    // (5)
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+
+        // whole job execution
+        List<Throwable> exceptions = jobExecution.getAllFailureExceptions(); // (6)
+        // (7)
+        if (exceptions.isEmpty()) {
+            return;
+        }
+        // (8)
+        logger.info("This job has occurred some exceptions as follow. " +
+                "[job-name:{}] [size:{}]",
+                jobExecution.getJobInstance().getJobName(), exceptions.size());
+        for (Throwable th : exceptions) {
+            logger.error("exception has occurred in job.", th);
+        }
+        // (9)
+        for (StepExecution stepExecution : jobExecution.getStepExecutions()) {
+            Object errorItem = stepExecution.getExecutionContext()
+                    .get("ERROR_ITEM"); // (10)
+            if (errorItem != null) {
+                logger.error("detected error on this item processing. " +
+                        "[step:{}] [item:{}]", stepExecution.getStepName(),
+                        errorItem);
+            }
+        }
+
+    }
+}
+----
+
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|In order to output error data with ``JobExecutionListener``, get the ``StepExecution`` instance before step execution.
+
+|(2)
+|Implement ``try-catch``.
+
+|(3)
+|Implement exception handling. +
+In this example, error data is stored in the context of the ``StepExecution`` instance with the key ``ERROR_ITEM``.
+
+|(4)
+|Throw an exception to do exception handling with ``JobExecutionListener``.
+
+|(5)
+|Implement exception handling in ``afterJob`` method.
+
+|(6)
+|From the argument ``jobExecution`` it gets error information which occurred in the entire job.
+
+|(7)
+|If there is no error information, it is determined as normal termination.
+
+|(8)
+|If there is error information, exception handling is performed. +
+In this example, log output with stack trace is done for all exceptions that occurred.
+
+|(9)
+|In this example, when there is error data, log output is performed. +
+Get the ``StepExecution`` instance from all the steps defined in the job and check whether the error data is stored with the key ``ERROR_ITEM``.
+If it is stored, it is logged as error data.
+
+|===
+
+[WARNING]
+.Object to be stored in ExecutionContext
+====
+The object to be stored in ``ExecutionContext`` must be a class that implements ``java.io.Serializable``.
+This is because ``ExecutionContext`` is stored in ``JobRepository``.
+====
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Determination_continued]]
+=== Determination as to whether processing can be continued
+How to decide whether or not to continue processing jobs when an exception occurs is explained.
+
+.Process continuation propriety method list
+
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip>>
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Retry>>
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Interruption>>
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip]]
+==== Skip
+A method of skipping an erroneous record and continuing processing is described.
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk]]
+===== Chunk model
+In the chunk model, the implementation method differs for components of each processing
+[IMPORTANT]
+====
+before applying the contents described here, make sure to read <<Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses>>.
+====
+
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemReader,Skip with ItemReader>>
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemProcessor,Skip with ItemProcessor>>
+* <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemWriter,Skip with ItemWriter>>
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemReader]]
+Skip with ItemReader::
+  Specify the skip method in ``skip-policy`` attribute of ``<batch:chunk>``.
+  In ``<batch:skippable-exception-classes>``, specify the exception class that occurs in the ItemReader to be skipped +
+  For the ``skip-policy`` attribute, use one of the following classes provided by {SB}.
+
+[cols="40,60", options="header"]
+.skip-policy list
+|===
+|Class name
+|Description
+
+|<<Ch06_ExceptionHandling_SkipPolicy_AlwaysSkipItemSkipPolicy,AlwaysSkipItemSkipPolicy>>
+|Always skip.
+
+|<<Ch06_ExceptionHandling_SkipPolicy_NeverSkipItemSkipPolicy,NeverSkipItemSkipPolicy>>
+|Do not skip.
+
+|<<Ch06_ExceptionHandling_SkipPolicy_LimitCheckingItemSkipPolicy,LimitCheckingItemSkipPolicy>>
+|Skip until the upper limit of the specified number of skips is reached. +
+When the upper limit value is reached, the following exception occurs. +
+``org.springframework.batch.core.step.skip.SkipLimitExceededException``
+
+This is the skipping method used by default when ``skip-policy`` is omitted.
+
+|<<Ch06_ExceptionHandling_SkipPolicy_ExceptionClassifierSkipPolicy,ExceptionClassifierSkipPolicy>>
+|Use this when you want to change ``skip-policy`` which applies to each exception.
+
+|===
+
+Implementation example of skipping is explained.
+
+Handle case where an incorrect record exists when reading a CSV file with ``FlatFileItemReader``. +
+The following exceptions occur at this time.
+
+* ``org.springframework.batch.item.ItemReaderException``(Base exception class)
+** ``org.springframework.batch.item.file.FlatFileParseException`` (Exception occured class)
+
+``skip-policy`` shows how to define it separately.
+
+[source, xml]
+.Definition of ItemReader as a prerequisite
+----
+<bean id="detailCSVReader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step">
+    <property name="resource" value="file:#{jobParameters['inputFile']}"/>
+    <property name="lineMapper">
+        <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+            <property name="lineTokenizer">
+                <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                      p:names="branchId,year,month,customerId,amount"/>
+            </property>
+            <property name="fieldSetMapper">
+                <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                      p:targetType="org.terasoluna.batch.functionaltest.app.model.performance.SalesPerformanceDetail"/>
+            </property>
+        </bean>
+    </property>
+</bean>
+----
+
+[[Ch06_ExceptionHandling_SkipPolicy_AlwaysSkipItemSkipPolicy]]
+AlwaysSkipItemSkipPolicy::
+
+[source, xml]
+.Specification example of AlwaysSkipItemSkipPolicy
+----
+<!-- (1) -->
+<bean id="skipPolicy"
+      class="org.springframework.batch.core.step.skip.AlwaysSkipItemSkipPolicy"/>
+
+<batch:job id="jobSalesPerfAtSkipAllReadError" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfAtSkipAllReadError.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"
+                         skip-policy="skipPolicy"> <!-- (2) -->
+            </batch:chunk>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Define ``AlwaysSkipItemSkipPolicy`` as a bean.
+
+|(2)
+|Set the bean defined in (1) to the ``skip-policy`` attribute of ``<batch:chunk>``
+|===
+
+[[Ch06_ExceptionHandling_SkipPolicy_NeverSkipItemSkipPolicy]]
+NeverSkipItemSkipPolicy::
+
+[source, xml]
+.Specification example of NeverSkipItemSkipPolicy
+----
+<!-- (1) -->
+<bean id="skipPolicy"
+      class="org.springframework.batch.core.step.skip.NeverSkipItemSkipPolicy"/>
+
+<batch:job id="jobSalesPerfAtSkipNeverReadError" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfAtSkipNeverReadError.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"
+                         skip-policy="skipPolicy"> <!-- (2) -->
+            </batch:chunk>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Define ``NeverSkipItemSkipPolicy``as a bean.
+
+|(2)
+|Set the bean defined in (1) to the ``skip-policy`` attribute of ``<batch:chunk>``.
+|===
+
+[[Ch06_ExceptionHandling_SkipPolicy_LimitCheckingItemSkipPolicy]]
+LimitCheckingItemSkipPolicy::
+
+[source, xml]
+.Specification example of LimitCheckingItemSkipPolicy
+----
+(1)
+<!--
+<bean id="skipPolicy"
+      class="org.springframework.batch.core.step.skip.LimitCheckingItemSkipPolicy"/>
+-->
+
+<batch:job id="jobSalesPerfAtValidSkipReadError" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfAtValidSkipReadError.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"
+                         skip-limit="2">  <!-- (2) -->
+                <!-- (3) -->
+                <batch:skippable-exception-classes>
+                    <!-- (4) -->
+                    <batch:include
+                        class="org.springframework.batch.item.ItemReaderException"/>
+                </batch:skippable-exception-classes>
+            </batch:chunk>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Define ``LimitCheckingItemSkipPolicy`` as a bean. +
+The ``skip-policy`` attribute is omitted by default, so it does not have to be defined.
+
+|(2)
+|Set the upper limit value of skip number in the ``skip-limit`` attribute of ``<batch:chunk>`` +
+The ``skip-policy`` attribute is omitted by default.
+
+|(3)
+|Define ``<batch:skippable-exception-classes>`` and set the targetted exception in the tag.
+
+|(4)
+|Set ``ItemReaderException`` as a skip target class.
+|===
+
+[[Ch06_ExceptionHandling_SkipPolicy_ExceptionClassifierSkipPolicy]]
+ExceptionClassifierSkipPolicy::
+
+[source, xml]
+.ExceptionClassifierSkipPolicy specification example
+----
+<!-- (1) -->
+<bean id="skipPolicy"
+      class="org.springframework.batch.core.step.skip.ExceptionClassifierSkipPolicy">
+    <property name="policyMap">
+        <map>
+            <!-- (2) -->
+            <entry key="org.springframework.batch.item.ItemReaderException"
+                   value-ref="alwaysSkip"/>
+        </map>
+    </property>
+</bean>
+<!-- (3) -->
+<bean id="alwaysSkip"
+      class="org.springframework.batch.core.step.skip.AlwaysSkipItemSkipPolicy"/>
+
+<batch:job id="jobSalesPerfAtValidNolimitSkipReadError"
+           job-repository="jobRepository">
+    <batch:step id="jobSalesPerfAtValidNolimitSkipReadError.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <!-- skip-limit value is dummy. -->
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"
+                         skip-policy="skipPolicy"> <!-- (4) -->
+            </batch:chunk>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Define ``ExceptionClassifierSkipPolicy`` as a bean.
+
+|(2)
+|Set the ``policyMap`` property to a map whose key is an exception class and whose value is skipped. +
+In this example, when ``ItemReaderException`` occurs, it is set to be the skip method defined in (3).
+
+|(3)
+|Define the skipping method you want to execute by exception. +
+In this example, ``AlwaysSkipItemSkipPolicy`` is defined.
+
+|(4)
+|Set the bean defined in (1) to the ``skip-policy`` attribute of ``<batch:chunk>``.
+
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemProcessor]]
+Skip on ItemProcessor::
+    Try ~ catch in ItemProcessor and return null. +
+    Skip with ``skip-policy`` is not used because reprocessing occurs in ItemProcessor.
+    For details, please refer <<Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses>>.
+
+[IMPORTANT]
+.Restrictions on exception handling in ItemProcessor
+====
+As in <<Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses>>,、
+In ItemProcessor, skipping using ``<batch:skippable-exception-classes>`` is forbidden.
+Therefore,cannot skip applying "How to use the <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_ItemProcessListener,ItemProcessListener>> interface."  explained in
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor>>.
+====
+
+Implementation example of skip.
+
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor_TryCatchExample,Implementation example of try~catch in ItemProcessor>> of
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor>>
+correspond to skip.
+
+[source,java]
+.try~catch example in ItemProcessor
+----
+@Component
+public class AmountCheckProcessor implements
+        ItemProcessor<SalesPerformanceDetail, SalesPerformanceDetail> {
+
+    // omitted.
+
+    @Override
+    public SalesPerformanceDetail process(SalesPerformanceDetail item) throws Exception {
+        // (1)
+        try {
+            checkAmount(item.getAmount(), amountLimit);
+        } catch (ArithmeticException ae) {
+            logger.warn("Exception occurred while processing. Skipped. [item:{}]",
+                    item, ae); // (2)
+            return null; // (3)
+        }
+        return item;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``try～catch``
+
+|(2)
+|Implement exception handling +
+In this example, the stack trace of the exception acquired from the argument is logged.
+
+|(3)
+|Skip error data by returning null.
+
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Chunk_ItemWriter]]
+Skip with ItemWriter::
+    In ItemWriter skip processing is not done generally. +
+    Even when skipping is necessary, skipping by ``skip-policy`` will not be used as the chunk size will change.
+    For details, please refer <<Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses>>.
+
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip_Tasklet]]
+===== Tasket model
+Handle exceptions in business logic and implement processing to skip error records independently.
+
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet_TaskletExample,Implementation example>> of
+<<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet>>
+corresponds to skip.
+
+[source, java]
+.Implementation example with tasklet model
+----
+@Component
+public class SalesPerformanceTasklet implements Tasklet {
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(SalesPerformanceTasklet.class);
+
+    // omitted.
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        // (1)
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution()
+                    .getExecutionContext());
+
+            List<SalesPerformanceDetail> items = new ArrayList<>(10);
+            SalesPerformanceDetail item = null;
+            do {
+                // Pseudo operation of ItemReader
+                // omitted.
+
+                // Pseudo operation of ItemProcessor
+                checkAmount(item.getAmount(), amountLimit);
+
+
+                // Pseudo operation of ItemWriter
+                // omitted.
+
+            } while (item != null);
+        } catch (Exception e) {
+            logger.warn("exception in tasklet. Skipped.", e);   // (2)
+            continue;    // (3)
+        } finally {
+            try {
+                reader.close();
+            } catch (Exception e) {
+                // do nothing.
+            }
+        }
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Implement ``try-catch``
+
+|(2)
+|Implement exception handling. +
+In this example, the stack trace of the exception that occurred is logged.
+
+|(3)
+|Processing of error data is skipped by continue.
+
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Retry]]
+==== Retry
+When an exception is detected, a method of reprocessing until the specified number of times is reached is described.
+
+For retry, it is necessary to consider various factors such as the presence or absence of state management and the situation where retry occurs,
+there is no reliable method, and retrying it unnecessarily deteriorates the situation.
+
+Therefore, this guideline explains how to use ``org.springframework.retry.support.RetryTemplate`` which implements a local retry.
+
+[WARNING]
+====
+As with skip, there is also a way to specify the target exception class with ``<retryable-exception-classes>``.
+However, as with <<Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses>>
+There is a side effect that causes performance degradation, so {batch5_shortname} does not use it.
+====
+
+
+[source,java]
+.RetryTemplate Implementation code
+----
+public class RetryableAmountCheckProcessor implements
+        ItemProcessor<SalesPerformanceDetail, SalesPerformanceDetail> {
+
+    // omitted.
+
+    // (1)
+    private RetryPolicy retryPolicy;
+
+    @Override
+    public SalesPerformanceDetail process(SalesPerformanceDetail item)
+            throws Exception {
+
+        // (2)
+        RetryTemplate rt = new RetryTemplate();
+        if (retryPolicy != null) {
+            rt.setRetryPolicy(retryPolicy);
+        }
+
+        try {
+            // (3)
+            rt.execute(new RetryCallback<SalesPerformanceDetail, Exception>() {
+                @Override
+                public SalesPerformanceDetail doWithRetry(RetryContext context) throws Exception {
+                    logger.info("execute with retry. [retry-count:{}]", context.getRetryCount());
+                    // retry mocking
+                    if (context.getRetryCount() == adjustTimes) {
+                        item.setAmount(item.getAmount().divide(new BigDecimal(10)));
+                    }
+                    checkAmount(item.getAmount(), amountLimit);
+                    return null;
+                }
+            });
+        } catch (ArithmeticException ae) {
+            // (4)
+            throw new IllegalStateException("check error at processor.", ae);
+        }
+        return item;
+    }
+
+    public void setRetryPolicy(RetryPolicy retryPolicy) {
+        this.retryPolicy = retryPolicy;
+    }
+}
+
+----
+
+[source, xml]
+.Bean definition
+----
+<!-- omitted -->
+
+<bean id="amountCheckProcessor"
+      class="org.terasoluna.batch.functionaltest.ch06.exceptionhandling.RetryableAmountCheckProcessor"
+      scope="step"
+      p:retryPolicy-ref="retryPolicy"/> <!-- (5) -->
+
+<!-- (6) (7) (8)-->
+<bean id="retryPolicy" class="org.springframework.retry.policy.SimpleRetryPolicy"
+      c:maxAttempts="3"
+      c:retryableExceptions-ref="exceptionMap"/>
+
+<!-- (9) -->
+<util:map id="exceptionMap">
+    <entry key="java.lang.ArithmeticException" value="true"/>
+</util:map>
+
+<batch:job id="jobSalesPerfWithRetryPolicy" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfWithRetryPolicy.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"/>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Store the retry condition.
+
+|(2)
+|Create an instance of RetryTemplate. +
+The default retry count = 3, all exceptions are subject to retry.
+
+|(3)
+| Use the ``RetryTemplate#execute`` method to execute the business logic you wish to retry +
+Execute only the part that you want to retry with the ``RetryTemplate#execute`` method, not the entire business logic.
+
+|(4)
+|Exception handling when the number of retries exceeds the specified number of times +
+The exception that occurs in the business logic is thrown as it is.
+
+|(5)
+|Specify the retry condition defined in (6).
+
+|(6)
+|Define the retry condition in the class that implements ``org.springframework.retry.RetryPolicy``. +
+In this example, we use ``SimpleRetryPolicy`` which is provided by {SB}.
+
+|(7)
+|Specify the number of retries in the ``maxAttempts`` constructor argument.
+
+|(8)
+|Specify the map that defines the target exception to be retried defined in (9) in ``retryableExceptions`` of the constructor argument.
+
+|(9)
+|Define a map in which the target exception class to be retried and the boolean value are set in the key +
+If the boolean value is ``true``, target exception is retried.
+
+|===
+
+[[Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Interruption]]
+==== Process interruption
+
+If you want to abort step execution, throw RuntimeException or its subclass other than skip / retry object.
+
+Implementation example of skip is shown based on <<Ch06_ExceptionHandling_SkipPolicy_LimitCheckingItemSkipPolicy,LimitCheckingItemSkipPolicy>>
+
+
+[source,xml]
+.Bean definition
+----
+<batch:job id="jobSalesPerfAtValidSkipReadError" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfAtValidSkipReadError.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"
+                         skip-limit="2">
+                <batch:skippable-exception-classes>
+                    <!-- (1) -->
+                    <batch:include class="org.springframework.batch.item.validator.ValidationException"/>
+                </batch:skippable-exception-classes>
+            </batch:chunk>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|If an exception other than ``ValidationException`` occurs, processing is interrupted.
+
+|===
+
+An implementation example of retry is shown based on  <<Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Retry>>.
+
+[source,xml]
+.Bean definition
+----
+<!-- omitted -->
+
+<bean id="retryPolicy" class="org.springframework.retry.policy.SimpleRetryPolicy"
+      c:maxAttempts="3"
+      c:retryableExceptions-ref="exceptionMap"/>
+
+<util:map id="exceptionMap">
+    <!-- (1) -->
+    <entry key="java.lang.UnsupportedOperationException" value="true"/>
+</util:map>
+
+<batch:job id="jobSalesPerfWithRetryPolicy" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfWithRetryPolicy.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="detailCSVReader"
+                         processor="amountCheckProcessor"
+                         writer="detailWriter" commit-interval="10"/>
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|If an exception other than ``UnsupportedOperationException`` occurs, processing is interrupted.
+
+|===
+
+
+[[Ch06_ExceptionHandling_Appendix]]
+== Appendix
+
+[[Ch06_ExceptionHandling_Appendix_SkippableExceptionClasses]]
+=== About reason why <skippable-exception-classes> is not used
+
+{SB} provides a function to specify an exception to be skipped for the entire job, skip processing the item where the exception occurred, and continue the processing.
+
+It implements the function by setting the ``<skippable-exception-classes>`` tag under the ``<chunk>`` tag and specifying the exception to be skipped as follows.
+
+[source, xml]
+.Usage example of <skippable-exception-classes>
+----
+<job id="flowJob">
+    <step id="retryStep">
+        <tasklet>
+            <chunk reader="itemReader" writer="itemWriter"
+                   processor="itemProcessor" commit-interval="20"
+                   skip-limit="10">
+                <skippable-exception-classes>
+                    <!-- specify exceptions to the skipped -->
+                    <include class="java.lang.Exception"/>
+                    <exclude class="java.lang.NullPointerException"/>
+                </skippable-exception-classes>
+            </chunk>
+        </tasklet>
+    </step>
+</job>
+----
+
+By using this function, it is possible to skip the record where the input check error has occurred and continue processing the subsequent data,
+For {batch5_shortname} it is not used for the following reasons.
+
+* If an exception is skipped using the  ``<skippable-exception-classes>`` tag,
+  since the number of data items included in one chunk varies, performance deterioration may occur.
+** This depends on where the exception occurred (`` ItemReader`` / `` ItemProcessor`` / `` ItemWriter``). Details are described later.
+
+[IMPORTANT]
+.Avoid using SkipPolicy without defining <skippable-exception-classes>
+====
+All exceptions are implicitly registered, and the possibility of performance degradation increases dramatically.
+====
+
+The behavior of each exception occurrence (`` ItemReader`` / `` ItemProcessor`` / `` ItemWriter``) is explained respectively. +
+The transaction operation is not processed regardless of where the exception occurred, but if an exception occurs, it is always rolled back and then processed again.
+
+When an exception occurs in ItemReader::
+
+* When an exception occurs in the process of ``ItemReader``, the processing object moves to the next item.
+* There is no side effect by this.
+
+When an exception occurs in ItemProcessor::
+
+* If an exception occurs within the processing of `` ItemProcessor``, return to the beginning of the chunk and reprocess from the first.
+* Items to be skipped for reprocessing are not included.
+* The chunk size at the first processing and reprocessing does not change.
+
+When an exception occurs in ItemWriter::
+
+* If an exception occurs within the processing of ``ItemWriter``, return to the beginning of the chunk and reprocess from the first.
+* Reprocessing is fixed to ``ChunkSize=1`` and executed one by one.
+* Items to be skipped for reprocessing are also included.
+
+If an exception occurs in ``ItemProcessor``, considering the case of ``ChunkSize=1000`` as an example,
+when an exception occurs on the 1000th case, reprocessing is done from the 1st and total of 1999 processes are executed.
+
+If an exception occurs in ``ItemWriter``, ``ChunkSize=1`` is fixed and reprocessed.
+Considering the case of `` ChunkSize = 1000`` as an example,
+it is divided into 1000 transactions regardless of originally 1 transaction and processed.
+
+These means that the processing time of the entire job is prolonged, and there is a high possibility of deteriorating the situation at the time of abnormality.
+In addition, there is a possibility that the double treatment itself becomes a problem, and it gives rise to additional consideration to the design manufacturing.
+
+Therefore, we do not recommend using ``<skippable-exception-classes>``.
+Skipping data that failed in ``ItemReader`` does not cause these problems,
+in order to prevent accidents, basically avoid it and apply it only when it is absolutely necessary.

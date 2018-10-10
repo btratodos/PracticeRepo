@@ -1,0 +1,1204 @@
+include::_include_all.adoc[]
+
+[[Ch04_AsyncJobWithDB]]
+= Asynchronous execution (DB polling)
+
+[[Ch04_AsyncJobWithDB_Overview]]
+== Overview
+Running a job using DB polling is explained.
+
+The usage method of this function is same in the chunk model as well as tasklet model.
+
+=== What is asynchronous execution by using DB polling?
+A dedicated table which registers jobs to be executed asynchronously (hereafter referred to as Job-request-table) is monitored periodically and job is asynchronously executed based on the registered information. +
+In {batch5_shortname}, a module which monitors the table and starts the job is defined with the name asynchronous batch daemon.
+Asynchronous batch daemon runs as a single Java process and executes by assigning threads in the process for each job.
+
+==== Functions offered by {batch5_shortname}
+{batch5_shortname} offers following functions as **Asynchronous execution (DB polling)**.
+
+[cols="40,60", options="header"]
+.List of asynchronous execution (DB polling) functions
+|===
+|Function
+|Description
+
+|Asynchronous batch daemon function
+|A function which permanently executes Job-request-table polling function
+
+|Job-request-table polling function
+|A function which asynchronously executes the job based on information registered in the Job-request-table. +
+It also offers a table definition of Job-request-table.
+
+|===
+
+===== Usage premise
+Only job requests are managed in Job-request-table. Execution status and results of requested job is entrusted to ``JobRepository``.
+It is assumed that job status is managed through these two factors. +
+
+Further, if in-memory database is used in ``JobRepository``, ``JobRepository`` is cleared after terminating asynchronous batch daemon and job execution status and results cannot be referred.
+Hence, it is assumed that a database that is ensured to be persistent is used in ``JobRepository``.
+
+[WARNING]
+.Using in-memory database
+====
+When job execution results success or failure can be obtained without referring ``JobRepository``, in-memory database can be used. +
+When long term continuous operations are performed in in-memory database, a large quantity of memory resources are likely to get consumed resulting in adverse effect on job execution. +
+In other words, in-memory database is not suitable for long term continuous operations and should be restarted periodically. +
+However, if it is to be used for long term continuous operations, maintenance work like deleting data periodically from ``JobRepository`` is necessary. +
+In case of a restart, if initialization is enabled, it gets recreated at the time of restart. Hence, maintenance is not required.
+For initialization, refer <<Ch03_CreateProject.adoc#Ch03_CreateProject_Make_Setting_DB, Database related settings>>.
+====
+
+==== Usage scene
+A few scenes which use asynchronous execution (DB polling).
+
+[cols="40,60", options="header"]
+.List of application scenes
+|===
+|Usage scene
+|Description
+
+|Delayed processing
+|When it is not necessary to complete the operation immediately in coordination with online processing and the operation which takes time to process is to be extracted as a job.
+
+|Continuous execution of jobs with short processing time
+|When continuous processing is done for a few seconds or a few tens of seconds for 1 job. +
+It is possible to avoid compression of resources by start and stop of Java process for 1 job, by using asynchronous execution (DB polling).
+Further, since it leads to omission of start and end processing, it is possible to reduce execution time of the job.
+
+|Aggregation of large number of jobs
+|Same as continuous execution of jobs with short processing time.
+
+|===
+
+[NOTE]
+.Points to choose asynchronous execution(DB polling) instead of asynchronous execution (Web container)
+====
+Points to choose asynchronous execution(DB polling) instead of <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithWeb,"Asynchronous execution (Web container)">> are shown below.
+
+* A hurdle in the introduction of WebAP server in batch processing
+* Consider only database while ensuring availability
+** Alternatively, since the access is concentrated in the database, scale is not likely to be like asynchronous execution (Web container).
+====
+
+[NOTE]
+.Reasons not to use {SBI}
+====
+The same function can be implemented by using {SBI}. +
+However, when {SBI} is used, it is necessary to understand and fetch technical elements including the elements other than that of asynchronous execution. +
+Accordingly, application of {SBI} is deferred in order to avoid difficulty in understanding / use / customization of this function.
+====
+
+[IMPORTANT]
+.Precautions in asynchronous execution (DB polling)
+====
+When a large number of super short batches which are less than several seconds for 1 job are to be executed, database including ``JobRepository`` is accessed every time.
+Since performance degradation can occur at this point of time, mass processing of super short batches is not suitable for asynchronous execution (DB polling).
+This point must be adequately reviewed while using this function to check whether target performance is met.
+====
+
+[[Ch04_AsyncJobWithDB_Arch]]
+== Architecture
+
+[[Ch04_AsyncJobWithDB_Arch_Sequence]]
+=== Processing sequence of DB polling
+Processing sequence of DB polling is explained.
+
+.Processing sequence diagram of DB polling
+image::Ch04_AsyncJobWithDB_Sequence_db_polling.png[sequence of DB polling]
+
+. Launch ``AsyncBatchDaemon`` from sh etc.
+. ``AsyncBatchDaemon`` reads all Bean definition files which defines the jobs at the startup.
+. ``AsyncBatchDaemon`` starts ``TaskScheduler`` for polling at regular intervals.
+* ``TaskScheduler`` starts a specific process at regular interval.
+. ``TaskScheduler`` starts ``JobRequestPollTask`` (a process which performs polling of Job-request-table).
+. ``JobRequestPollTask`` fetches a record for which the polling status is "not executed" (INIT), from Job-request-table.
+* Fetch a fixed number of records collectively. Default is 3 records.
+* When the target record does not exist, perform polling at regular intervals. Default is 5 seconds interval.
+. ``JobRequestPollTask`` allocates jobs to thread and executes them based on information of records.
+. ``JobRequestPollTask`` updates polling status of the Job-request-table to "polled" (POLLED).
+* When number of synchronous execution jobs is achieved, the record which cannot be activated from the fetched records is discarded and the record is fetched again at the time of next polling process.
+. Job assigned to the thread run a job with ``JobOperator``.
+. Fetch job execution ID of executed jobs (Job execution id).
+. ``JobRequestPollTask`` updates the polling status of the Job-request-table to "Executed" (EXECUTED) based on job execution ID fetched at the time of job execution.
+
+[NOTE]
+.Supplement of processing sequence
+====
+{SB} reference shows that asynchronous execution can be implemented by setting ``AsyncTaskExecutor`` in ``JobLauncher``.
+However, when this method is adopted, ``AsyncTaskExecutor`` cannot detect the state wherein job execution cannot be performed.
+This issue occurs when there is no thread assigned to the  job and it is likely to lead to following events.
+
+* Even though the job cannot be executed, it tries to run the job and continues to perform unnecessary operation.
+* The job does not run in the polling sequence but appears to be started randomly on the Job-request-table depending on the time when the thread is free.
+
+The processing sequence described earlier is used in order to avoid this phenomenon.
+====
+
+[[Ch04_AsyncJobWithDB_Arch_RequireTable]]
+=== About the table to be polled
+Explanation is given about table which performs polling in asynchronous execution (DB polling).
+
+Following database objects are necessary.
+
+* Job-request-table (Required)
+* Job sequence (Required for some database products)
+** It is necessary when database does not support auto-numbering of columns.
+
+==== Job-request-table structure
+PostgreSQL from database products corresponding to {batch5_shortname} is shown.
+For other databases, refer DDL included in jar of {batch5_shortname}.
+
+[IMPORTANT]
+. Regarding character string stored in the job request table
+====
+Similar to meta data table, job request table column provides a DDL which explicitly sets character data type in character count definition.
+====
+
+[cols="20,20,20,40", options="header"]
+.batch_job_request (In case of PostgreSQL)
+|===
+|Column Name
+|Data type
+|Constraint
+|Description
+
+|job_seq_id
+|bigserial
+
+(Use bigint to define a separate sequence)
+|NOT NULL +
+PRIMARY KEY
+|A number to determine the sequence of jobs to be executed at the time of polling. +
+Use auto-numbering function of database.
+
+|job_name
+|varchar(100)
+|NOT NULL
+|Job name to be executed. +
+Required parameters for job execution.
+
+|job_parameter
+|varchar(200)
+|-
+|Parameters to be passed to jobs to be executed.
+
+Single parameter format is same as synchronous execution, however, when multiple parameters are to be specified,
+each parameter must be separated by a comma (see below) unlike blank delimiters of synchronous execution. +
+
+{Parameter name}={parameter value},{Parameter name}={Parameter value}...
+
+|job_execution_id
+|bigint
+|-
+|ID to be paid out at the time of job execution. +
+Refer ``JobRepository`` using ID as a key.
+
+|polling_status
+|varchar(10)
+|NOT NULL
+|Polling process status. +
+INIT : Not executed +
+POLLED: Polled +
+EXECUTED : Job executed
+
+|create_date
+|TIMESTAMP
+|NOT NULL
+|Date and time when the record of the job request is registered.
+
+|update_date
+|TIMESTAMP
+|-
+|Date and time when the record of job request is updated.
+
+|===
+
+DDL is as below.
+[source, sql]
+----
+CREATE TABLE IF NOT EXISTS batch_job_request (
+    job_seq_id bigserial PRIMARY KEY,
+    job_name varchar(100) NOT NULL,
+    job_parameter varchar(200),
+    job_execution_id bigint,
+    polling_status varchar(10) NOT NULL,
+    create_date timestamp NOT NULL,
+    update_date timestamp
+);
+----
+
+==== Job request sequence structure
+When the database does not support auto-numbering of database columns, numbering according to sequence is required. +
+A PostgreSQL from database products corresponding to {batch5_shortname} is shown. +
+For other databases, refer DDL included in jar of {batch5_shortname}.
+
+DDL is as below.
+[source, sql]
+----
+CREATE SEQUENCE batch_job_request_seq MAXVALUE 9223372036854775807 NO CYCLE;
+----
+
+[WARNING]
+====
+A job request sequence is not defined in DDL included in jar of {batch5_shortname}, for databases supporting auto-numbering of columns.
+When you want to change maximum value in the sequence, it is preferable to define the job request sequence besides changing data type 
+of ``job_seq_id`` from auto-numbering definition to numeric data type
+(In case of PostgreSQL, from ``bigserial`` to ``bigint``).
+====
+
+==== Transition pattern of polling status (polling_status)
+Transition pattern of polling status is shown in the table below.
+
+[cols="20,20,60", options="header"]
+.Transition pattern list of polling status
+|===
+|Transition source
+|Transition destination
+|Description
+
+|INIT
+|INIT
+|When the number of synchronous executions has been achieved and execution of job is denied, status remains unchanged. +
+It acts as a record for polling at the time of next polling.
+
+|INIT
+|POLLED
+|Transition is done when the job is successfully started. +
+Status when the job is running.
+
+|POLLED
+|EXECUTED
+|Transition occurs when job execution is completed.
+
+|===
+
+==== Job request fetch SQL
+Number to be fetched by job request fetch SQL is restricted in order to fetch job request for number of synchronously executed jobs. +
+Job request fetch SQL varies depending on the database product and version to be used.
+Hence, it may not be possible to handle with SQL provided by {batch5_shortname}. +
+In that case, SQLMap of ``BatchJobRequestMapper.xml`` should be redefined
+using <<Ch04_AsyncJobWithDB_HowToExtend_CustomTable>> as a reference. +
+For SQL offered, refer ``BatchJobRequestMapper.xml`` included in jar of {batch5_shortname}.
+
+[[Ch04_AsyncJobWithDB_Arch_JobLaunching]]
+=== About job running
+Running method of job is explained.
+
+Job is run by ``start`` method of ``JobOperator`` offered by {SB} in Job-request-table polling function of
+{batch5_shortname}.
+
+With {batch5_shortname}, guidelines explain the restart of jobs started by asynchronous execution (DB polling) from the command line.
+Hence, ``JobOperator`` also contains startup methods like ``restart`` etc besides ``start``, however,
+only ``start`` method is used.
+
+.Arguments of start method
+jobName::
+  Set the value registered in ``job_name`` of Job-request-table.
+jobParametrers::
+  Set the value registered in ``job_parameters`` of Job-request-table.
+
+[[Ch04_AsyncJobWithDB_Arch_OnError]]
+=== When abnormality is detected in DB polling process.
+Explanation is given for when an abnormality is detected in DB polling process.
+
+==== Database connection failure
+Describe behaviour for the processing performed at the time of failure occurrence.
+
+When records of Job-request-table are fetched::
+  * ``JobRequestPollTask`` results in an error, however, ``JobRequestPollTask`` is executed again in next polling.
+While changing the polling status from INIT to POLLED::
+  * ``JobRequestPollTask`` terminates with an error prior to executing job by ``JobOperator``. Polling status remains unchanged as INIT.
+  * In the polling process performed after connection failure recovery, the job becomes a target for execution as there is no change in the Job-request-table and the job is executed at the next polling.
+While changing polling status from POLLED to EXECUTED::
+  * ``JobRequestPollTask`` terminates with an error since the job execution ID cannot be updated in the Job-request-table. Polling status remains unchanged as POLLED.
+  * It is out of the scope for the polling process to be performed after connection failure recovery and the job at the time of failure is not executed.
+  * Since a job execution ID cannot be identified from a Job-request-table, final status of the job is determined from log or ``JobRepository`` and re-execute the job as a process of recovery when required.
+
+[WARNING]
+====
+Even if an exception occurs in ``JobRequestPollTask``, it is not restored immediately. Reason is given below.
+
+. Since ``JobRequestPollTask`` is started at regular intervals, auto-restoration is possible (not immediate) by delegating the operation to ``JobRequestPollTask``.
+. It is very rare to be able to recover after retrying immediately at the time of failure occurrence, in addition, it is likely to generate load due to attempt of retry.
+====
+
+==== Abnormal termination of asynchronous batch daemon process
+When a process of asynchronous batch daemon terminates abnormally, transaction of the job being executed is rolled back implicitly. +
+State of the polling status is same as status at the time of database connection failure.
+
+[[Ch04_AsyncJobWithDB_Arch_Shutdown]]
+=== Stopping DB polling process
+Asynchronous batch daemon (``AsyncBatchDaemon``) stops by generation of a file.
+After confirming that the file has been generated, make the polling process idle, wait as long as possible to job being started and then stop the process.
+
+[[Ch04_AsyncJobWithDB_Arch_Components]]
+=== About  application configuration specific to asynchronous execution
+Configuration specific to asynchronous execution is explained.
+
+[[Ch04_AsyncJobWithDB_Arch_AppCtx]]
+==== ApplicationContext configuration
+Asynchronous batch daemon reads ``async-batch-daemon.xml`` dedicated to asynchronous execution as ApplicationContext.
+Configuration below is added besides ``launch-context.xml`` used in synchronous execution as well.
+
+Asynchronous execution settings::
+  A Bean necessary for asynchronous execution like ``JobRequestPollTask`` etc. is defined.
+
+Job registration settings::
+  Job executed as an asynchronous execution registers by ``org.springframework.batch.core.configuration.support.AutomaticJobRegistrar``.
+  Context for each job is modularized by using ``AutomaticJobRegistrar``.
+  When modularization is done, it does not pose an issue even of Bean ID used between the jobs is duplicated.
+
+[NOTE]
+.What is modularization
+====
+Modularization is a hierarchical structure of "Common definition - Definition of each job" and the Bean defined in each job belongs to an independent context between jobs.
+If a reference to a Bean which is not defined in each job definition exists, it refers to a Bean defined in common definition.
+====
+
+[[Ch04_AsyncJobWithDB_Arch_Config]]
+==== Bean definition structure
+Bean definition of a job can be same as Bean definition of synchronous execution. However, following precautions must be taken.
+
+* When job is to be registered by ``AutomaticJobRegistrar``, Bean ID of the job is an identifier, and hence should not be duplicated.
+* It is also desirable to not to duplicate Bean ID of step.
+** Only the job ID should be uniquely designed by designing naming rules of Bean ID as ``{Job ID}.{Step ID}``.
+
+[NOTE]
+====
+Import of ``job-base-context.xml`` in the Bean definition of job varies for synchronous and asynchronous execution.
+
+* In synchronous execution, ``launch-context.xml`` is imported from ``job-base-context.xml``.
+* In asynchronous execution, ``launch-context.xml`` is not imported from ``job-base-context.xml``.
+  Alternatively,  import ``launch-context.xml`` from ``async-batch-daemon.xml`` which AsyncBatchDaemon loads.
+
+
+This is because various Beans required for starting {SB} need not be instantiated for each job.
+Only one bean should be created in common definition (``async-batch-daemon.xml``) which acts as a parent for each job, from various Beans required for starting {SB}.
+====
+
+[[Ch04_AsyncJobWithDB_HowToUse]]
+== How to use
+
+[[Ch04_AsyncJobWithDB_HowToUse_Config]]
+=== Various settings
+
+==== Settings for polling process
+Use ``batch-application.properties`` for settings required for asynchronous execution.
+
+[source,properties]
+.batch-application.properties
+----
+#(1)
+# Admin DataSource settings.
+admin.jdbc.driver=org.postgresql.Driver
+admin.jdbc.url=jdbc:postgresql://localhost:5432/postgres
+admin.jdbc.username=postgres
+admin.jdbc.password=postgres
+
+# TERASOLUNA AsyncBatchDaemon settings.
+# (2)
+async-batch-daemon.schema.script=classpath:org/terasoluna/batch/async/db/schema-postgresql.sql
+# (3)
+async-batch-daemon.job-concurrency-num=3
+# (4)
+async-batch-daemon.polling-interval=5000
+# (5)
+async-batch-daemon.polling-initial-delay=1000
+# (6)
+async-batch-daemon.polling-stop-file-path=/tmp/end-async-batch-daemon
+----
+
+[cols="10,90", options="header"]
+.Setup details item list
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Connection settings for database wherein Job-request-table is stored. +
+``JobRepository`` settings are used by default.
+
+|(2)
+|A path for DDL which defines Job-request-table. +
+It is auto-generated when Job-request-table does not exist at the time of starting asynchronous batch daemon. +
+This is primarily a test function and execution can be set by ``data-source.initialize.enabled`` of+
+``batch-application.properties``. +
+For detailed definition, refer ``<jdbc:initialize-database>>`` in ``async-batch-daemon.xml``.
+
+|(3)
+|Setting for records which are fetched collectively at the time of polling. This setup value is also used as a synchronous parallel number.
+
+|(4)
+|Polling cycle settings. Unit is milliseconds.
+
+|(5)
+|Polling initial start delay time settings. Unit is milliseconds.
+
+|(6)
+|Exit file path settings.
+
+|===
+
+[NOTE]
+.Changing setup value using environment variable
+====
+Setup value of ``batch-application.properties`` can be changed by defining environment variable with same name. +
+When an environment variable is set, it is prioritized over property value. +
+This happens due to Bean definition below.
+
+[source,xml]
+.Settings for launch-context.xml
+----
+<context:property-placeholder location="classpath:batch-application.properties"
+        system-properties-mode="OVERRIDE"
+        ignore-resource-not-found="false"
+        ignore-unresolvable="true"
+        order="1"/>
+----
+
+For details, refer
+{server5_url}/ArchitectureInDetail/GeneralFuncDetail/PropertyManagement.html#technical-details-label[How to define a property file] of {server5_guide}.
+====
+
+
+[[Ch04_AsyncJobWithDB_HowToUse_Config_Job]]
+==== Job settings
+Job to be executed asynchronously is set in ``automaticJobRegistrar`` of ``async-batch-daemon.xml``. +
+Default settings are shown below.
+
+[source,xml]
+.async-batch-daemon.xml
+----
+<bean id="automaticJobRegistrar"
+      class="org.springframework.batch.core.configuration.support.AutomaticJobRegistrar">
+    <property name="applicationContextFactories">
+        <bean class="org.springframework.batch.core.configuration.support.ClasspathXmlApplicationContextsFactoryBean">
+            <property name="resources">
+                <list>
+                    <value>classpath:/META-INF/jobs/**/*.xml</value>  <!-- (1) -->
+                </list>
+            </property>
+        </bean>
+    </property>
+    <property name="jobLoader">
+        <bean class="org.springframework.batch.core.configuration.support.DefaultJobLoader"
+              p:jobRegistry-ref="jobRegistry" />
+    </property>
+</bean>
+----
+
+[cols="10,90", options="header"]
+.Setting details item list
+|===
+
+|Sr.No.
+|Description
+
+|(1)
+|A path for Bean definition of a job executed asynchronously.
+
+|===
+
+[WARNING]
+.About registered jobs
+====
+For registering jobs, jobs which are designed and implemented on the premise that they are executed asynchronously should be specified.
+If the jobs which are not supposed to be executed asynchronously are included, exceptions may occur due to unintended references at the time of job registration.
+
+[source,xml]
+.Example of Narrowing down
+----
+<bean id="automaticJobRegistrar"
+      class="org.springframework.batch.core.configuration.support.AutomaticJobRegistrar">
+    <property name="applicationContextFactories">
+        <bean class="org.springframework.batch.core.configuration.support.ClasspathXmlApplicationContextsFactoryBean">
+            <property name="resources">
+                <list>
+                    <!-- For the async directory and below -->
+                    <value>classpath:/META-INF/jobs/aysnc/**/*.xml</value>
+                    <!-- For a specific job -->
+                    <value>classpath:/META-INF/jobs/CASE100/SpecialJob.xml</value>
+                </list>
+            </property>
+        </bean>
+    </property>
+    <property name="jobLoader">
+        <bean class="org.springframework.batch.core.configuration.support.DefaultJobLoader"
+            p:jobRegistry-ref="jobRegistry" />
+    </property>
+</bean>
+----
+====
+
+[TIP]
+.Input value verification for job parameters
+====
+``JobPollingTask`` does not validate the records obtained from Job-request-table. +
+Hence, the job name and job parameter must be verified for the table registration. +
+If the job name is incorrect, job is not detected even if it has started and an exception occurs. +
+If the job parameter is incorrect, an erroneous operation is performed even if the job has started. +
+Only job parameters can be verified once the job is started. For verification of job parameters, refer
+<<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_ParamsValidation,"Validity verification of parameters">>.
+====
+
+[IMPORTANT]
+.Job design considerations
+====
+As a characteristic of asynchronous execution (DB polling), the same job can be executed in parallel. It is necessary to prevent the same job to create an impact when the jobs are run in parallel.
+====
+
+[[Ch04_AsyncJobWithDB_HowToUse_Daemon]]
+=== From start to end of asynchronous execution
+Start and end of asynchronous batch daemon and how to register in Job-request-table are explained.
+
+==== Start of asynchronous batch daemon
+Start ``AsyncBatchDaemon`` offered by {batch5_shortname}.
+
+[source,console]
+.Start of AsyncBatchDaemon
+----
+# Start AsyncBatchDaemon
+$ java -cp dependency/* org.terasoluna.batch.async.db.AsyncBatchDaemon
+----
+
+In this case, ``META-INF/spring/async-batch-daemon.xml`` is read and various Beans are generated.
+
+Further, when ``async-batch-daemon.xml`` customised separately, it is implemented by specifying first argument and starting ``AsyncBatchDaemon``. +
+Bean definition file specified in the argument must be specified as a relative path from the class path. +
+Note that, the second and subsequent arguments are ignored.
+
+[source,console]
+.When customised META-INF/spring/customized-async-batch-daemon.xml is used,
+----
+# Start AsyncBatchDaemon
+$ java -cp dependency/* org.terasoluna.batch.async.db.AsyncBatchDaemon \
+    META-INF/spring/customized-async-batch-daemon.xml
+----
+
+Customisation of ``async-batch-daemon.xml`` can be modified directly by changing some of the settings. +
+However, when significant changes are added or when multiple settings are managed in <<Ch04_AsyncJobWithDB_HowToExtend_MultiDaemon>>described later,
+it is easier to manage and create separate files. +
+It should be choosed according to user's situation..
+
+[NOTE]
+====
+It is assumed that jar expressions necessary for execution are stored under dependency.
+====
+
+==== Job request
+Register in Job-request-table by issuing SQL of INSERT statement.
+
+[source,sql]
+.In case of PostgreSQL
+----
+INSERT INTO batch_job_request(job_name,job_parameter,polling_status,create_date)
+VALUES ('JOB01', 'param1=dummy,param2=100', 'INIT', current_timestamp);
+----
+
+[[Ch04_AsyncJobWithDB_HowToUse_Daemon_stop]]
+==== Stopping asynchronous batch daemon
+Keep exit file set in ``batch-application.properties``.
+
+[source,console]
+----
+$ touch /tmp/end-async-batch-daemon
+----
+
+[IMPORTANT]
+.When the exit file exists prior to starting asynchronous batch daemon
+====
+When the exit file exists prior to starting asynchronous batch daemon, asynchronous batch daemon terminates immediately.
+Asynchronous batch daemon must be started in the absence of exit file.
+====
+
+[[Ch04_AsyncJobWithDB_HowToUse_RefStatus]]
+=== Confirm job status
+Job status management is performed with ``JobRepository`` offered by {SB} and the job status is not managed in the Job-request-table.
+Job-request-table has a column of ``job_execution_id`` and job status corresponding to individual requests can be confirmed by the value stored in this column.
+Here, a simple example wherein SQL is issued directly and job status is confirmed is shown.
+For details of job status confirmation, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement_Retrieve,"Status confirmation">>.
+
+[source,sql]
+.In case of PostgreSQL
+----
+SELECT job_execution_id FROM batch_job_request WHERE job_seq_id = 1;
+
+job_execution_id
+----------------
+              2
+(1 row)
+
+SELECT * FROM batch_job_execution WHERE job_execution_id = 2;
+
+job_execution_id | version | job_instance_id |       create_time       |       start_time        |        end_time         |  status   | exit_code | exit_message |
+ocation
+------------------+---------+-----------------+-------------------------+-------------------------+-------------------------+-----------+-----------+--------------+-
+--------
+              2 |       2 |               2 | 2017-02-06 20:54:02.263 | 2017-02-06 20:54:02.295 | 2017-02-06 20:54:02.428 | COMPLETED | COMPLETED |              |
+(1 row)
+----
+
+[[Ch04_AsyncJobWithDB_HowToUse_Recovery]]
+=== Recovery after a job is terminated abnormally
+For basic points related to recovery of a job which is terminated abnormally, refer <<Ch06_ReProcessing.adoc#Ch06_RerunRestart,"Re-execution of process">>. Here, points specific to asynchronous execution are explained.
+
+==== Re-run
+Job which is terminated abnormally is re-run by inserting it as a separate record in Job-request-table.
+
+==== Restart
+When the job which is terminated abnormally is to be restarted, it is executed as a synchronous execution job from the command line.
+The reason for executing from the command line is "since it is difficult to determine whether the restart is intended or whether it is an unintended duplicate execution resulting in chaotic operation." +
+For restart methods, refer <<Ch06_ReProcessing.adoc#Ch06_RerunRestart_HowToUse_Restart,"Job restart">>.
+
+==== Termination
+. When the process has not terminated even after exceeding the expected processing time, attempt terminating the operation from the command line.
+For methods of termination, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement_JobStop,"Job stop">>.
+. When the termination is not accepted even from a command line, asynchronous batch daemon should be terminated by <<Ch04_AsyncJobWithDB_HowToUse_Daemon_stop>>.
+. If even an asynchronous batch daemon cannot be terminated, process of asynchronous batch daemon should be forcibly terminated.
+
+[IMPORTANT]
+====
+Adequate care should be taken not to impact other jobs when an asynchronous batch daemon is being terminated.
+====
+
+[[Ch04_AsyncJobWithDB_HowToUse_Env]]
+=== About environment deployment
+Building and deploying job is same as a synchronous execution. However, it is important to narrow down the jobs which are executed asynchronously as shown in <<Ch04_AsyncJobWithDB_HowToUse_Config_Job>>.
+
+[[Ch04_AsyncJobWithDB_HowToUse_Evacuation_Cumulative_Data]]
+=== Evacuation of cumulative data
+If you run an asynchronous batch daemon for a long time, a huge amount of data is accumulated in JobRepository and the Job-request-table.
+It is necessary to clear this cumulative data for the following reasons.
+
+* Performance degradation when data is retrieved or updated for a large quantity of data
+* Duplication of ID due to circulation of ID numbering sequence
+
+For evacuation of table data and resetting a sequence, refer manual for the database to be used.
+
+List of tables and sequences for evacuation is shown below.
+
+[cols="50,50", options="header"]
+.List for evacuation
+|===
+
+|Table/Sequence
+|Framework offered
+
+|batch_job_request
+.2+|{batch5_shortname}
+
+|batch_job_request_seq
+
+|batch_job_instance
+.9+|{SB}
+
+|batch_job_exeution
+
+|batch_job_exeution_params
+
+|batch_job_exeution_context
+
+|batch_step_exeution
+
+|batch_step_exeution_context
+
+|batch_job_seq
+
+|batch_job_execution_seq
+
+|batch_step_execution_seq
+
+|===
+
+[IMPORTANT]
+.Auto-numbering column sequence
+====
+Since a sequence is created automatically for an auto-numbering column, remember to include this sequence while evacuating data.
+====
+
+[IMPORTANT]
+.About database specific specifications
+====
+Note that Oracle uses database-specific data types in some cases, such as using CLOB for data types.
+====
+
+[[Ch04_AsyncJobWithDB_HowToExtend]]
+== How to extend
+
+[[Ch04_AsyncJobWithDB_HowToExtend_CustomTable]]
+=== Customising Job-request-table
+Job-request-table can be customised by adding a column in order to change extraction conditions of fetched records.
+However, only ``BatchJobRequest`` can be passed as an item while issuing SQL from ``JobRequestPollTask``.
+
+Extension procedure by customising the Job-request-table is shown below.
+
+. Customising Job-request-table
+. Creating an extension interface of ``BatchJobRequestRepository`` interface
+. Defining SQLMap which uses customised table
+. Modifying Bean definition of ``async-batch-daemon.xml``
+
+Examples of customization are as below.
+
+* <<Ch04_AsyncJobWithDB_HowToExtend_CustomTable_Priority>>
+* <<Ch04_AsyncJobWithDB_HowToExtend_CustomTable_GroupID>>
+
+Hereafter, the extension procedure will be described for these two examples.
+
+[[Ch04_AsyncJobWithDB_HowToExtend_CustomTable_Priority]]
+==== Example of controlling job execution sequence by priority column
+. Customising Job-request-table
+
+Add a priority column (priority) in Job-request-table.
+
+[source,sql]
+.Adding a priority column (In case of PostgreSQL)
+----
+CREATE TABLE IF NOT EXISTS batch_job_request (
+    job_seq_id bigserial PRIMARY KEY,
+    job_name varchar(100) NOT NULL,
+    job_parameter varchar(200),
+    priority int NOT NULL,
+    job_execution_id bigint,
+    polling_status varchar(10) NOT NULL,
+    create_date timestamp NOT NULL,
+    update_date timestamp
+);
+
+----
+
+[start=2]
+. Create extension interface of ``BatchJobRequestRepository`` interface
+
+An interface which extends ``BatchJobRequestRepository`` interface is created.
+
+[source,java]
+.Extension interface
+----
+// (1)
+public interface CustomizedBatchJobRequestRepository extends BatchJobRequestRepository {
+    // (2)
+}
+----
+
+[cols="10,90", options="header"]
+.Extension points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Extend ``BatchJobRequestRepository``.
+
+
+|(2)
+|Do not add a method.
+|===
+
+
+[start=3]
+. Definition of SQLMap which use a customised table
+
+Define SQL in SQLMap with group ID as a condition for extraction.
+
+[source,xml]
+.SQLMap definition (CustomizedBatchJobRequestRepository.xml)
+----
+<!-- (1) -->
+<mapper namespace="org.terasoluna.batch.extend.repository.CustomizedBatchJobRequestRepository">
+
+    <select id="find" resultType="org.terasoluna.batch.async.db.model.BatchJobRequest">
+        SELECT
+            job_seq_id AS jobSeqId,
+            job_name AS jobName,
+            job_parameter AS jobParameter,
+            job_execution_id AS jobExecutionId,
+            polling_status AS pollingStatus,
+            create_date AS createDate,
+            update_date AS updateDate
+        FROM
+            batch_job_request
+        WHERE
+            polling_status = 'INIT'
+        ORDER BY
+            priority ASC,   <!--(2) -->
+            job_seq_id ASC
+        LIMIT #{pollingRowLimit}
+    </select>
+
+    <!-- (3) -->
+    <update id="updateStatus">
+        UPDATE
+            batch_job_request
+        SET
+            polling_status = #{batchJobRequest.pollingStatus},
+            job_execution_id = #{batchJobRequest.jobExecutionId},
+            update_date = #{batchJobRequest.updateDate}
+        WHERE
+            job_seq_id = #{batchJobRequest.jobSeqId}
+        AND
+            polling_status = #{pollingStatus}
+    </update>
+
+</mapper>
+----
+
+[cols="10,90", options="header"]
+.Extension points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Set extended interface of ``BatchJobRequestRepository``in namespace by FQCN.
+
+
+|(2)
+|Add priority to ORDER clause.
+
+|(3)
+|Do not change updated SQL.
+
+|===
+
+[start=4]
+. Modifying Bean definition of ``async-batch-daemon.xml``
+
+Set extended interface created in (2) in ``batchJobRequestRepository``.
+
+[source,xml]
+.async-batch-daemon.xml
+----
+ <!--(1) -->
+<bean id="batchJobRequestRepository"
+      class="org.mybatis.spring.mapper.MapperFactoryBean"
+      p:mapperInterface="org.terasoluna.batch.extend.repository.CustomizedBatchJobRequestRepository"
+      p:sqlSessionFactory-ref="adminSqlSessionFactory" />
+----
+
+[cols="10,90", options="header"]
+.Extension points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Set extended interface of ``BatchJobRequestRepository`` in ``mapperInterface`` property by FQCN.
+
+|===
+
+[[Ch04_AsyncJobWithDB_HowToExtend_CustomTable_GroupID]]
+==== Distributed processing by multiple processes using a group ID
+Specify group ID by using environment variable while starting ``AsyncBatchDaemon`` and narrow down the target job.
+
+. Customizing Job-request-table
+
+Add group ID column (group_id) to Job-request-table.
+
+[source,sql]
+.Adding group ID column (In case of PostgreSQL)
+----
+CREATE TABLE IF NOT EXISTS batch_job_request (
+    job_seq_id bigserial PRIMARY KEY,
+    job_name varchar(100) NOT NULL,
+    job_parameter varchar(200),
+    group_id varchar(10) NOT NULL,
+    job_execution_id bigint,
+    polling_status varchar(10) NOT NULL,
+    create_date timestamp NOT NULL,
+    update_date timestamp
+);
+
+----
+
+[start=2]
+. Creating extended interface of ``BatchJobRequestRepository`` interface
+** Same as <<Ch04_AsyncJobWithDB_HowToExtend_CustomTable_Priority>>
+
+[start=3]
+. Definition of SQLMap which use customised table
+
+Define SQL in SQLMap with  the group ID as the extraction condition.
+
+[source,xml]
+.SQLMap definition (CustomizedBatchJobRequestRepository.xml)
+----
+<!-- (1) -->
+<mapper namespace="org.terasoluna.batch.extend.repository.CustomizedBatchJobRequestRepository">
+
+    <select id="find" resultType="org.terasoluna.batch.async.db.model.BatchJobRequest">
+        SELECT
+            job_seq_id AS jobSeqId,
+            job_name AS jobName,
+            job_parameter AS jobParameter,
+            job_execution_id AS jobExecutionId,
+            polling_status AS pollingStatus,
+            create_date AS createDate,
+            update_date AS updateDate
+        FROM
+            batch_job_request
+        WHERE
+            polling_status = 'INIT'
+        AND
+            group_id = #{groupId}  <!--(2) -->
+        ORDER BY
+            job_seq_id ASC
+        LIMIT #{pollingRowLimit}
+    </select>
+
+    <!-- omitted -->
+</mapper>
+----
+
+[cols="10,90", options="header"]
+.Extension points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Set extended interface of ``BatchJobRequestRepository`` in namespace by FQCN.
+
+
+|(2)
+|Add groupId to extraction conditions.
+|===
+
+[start=4]
+. Modifying Bean definition of ``async-batch-daemon.xml``
+
+Set extended interface created in (2) in ``batchJobRequestRepository`` and
+set the group ID assigned by environment variable in ``jobRequestPollTask`` as a query parameter.
+
+
+[source,xml]
+.async-batch-daemon.xml
+----
+ <!--(1) -->
+<bean id="batchJobRequestRepository"
+      class="org.mybatis.spring.mapper.MapperFactoryBean"
+      p:mapperInterface="org.terasoluna.batch.extend.repository.CustomizedBatchJobRequestRepository"
+      p:sqlSessionFactory-ref="adminSqlSessionFactory" />
+
+    <bean id="jobRequestPollTask"
+          class="org.terasoluna.batch.async.db.JobRequestPollTask"
+          c:transactionManager-ref="adminTransactionManager"
+          c:jobOperator-ref="jobOperator"
+          c:batchJobRequestRepository-ref="batchJobRequestRepository"
+          c:daemonTaskExecutor-ref="daemonTaskExecutor"
+          c:automaticJobRegistrar-ref="automaticJobRegistrar"
+          p:optionalPollingQueryParams-ref="pollingQueryParam" /> <!-- (2) -->
+
+   <bean id="pollingQueryParam"
+         class="org.springframework.beans.factory.config.MapFactoryBean">
+        <property name="sourceMap">
+            <map>
+                <entry key="groupId" value="${GROUP_ID}"/>  <!-- (3) -->
+            </map>
+        </property>
+   </bean>
+----
+
+[cols="10,90", options="header"]
+.Extension points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Set extended interface of ``BatchJobRequestRepository`` in ``mapperInterface`` property by FQCN..
+
+|(2)
+|Set Map defined in (3), in ``optionalPollingQueryParams`` property of ``JobRequestPollTask``.
+
+|(3)
+|Set group ID assigned by environment variable (GROUP_ID) in group ID (groupId) of query parameter.
+
+|===
+
+[start=5]
+. Set group ID in environment variable and start ``AsyncBatchDaemon``.
+
+[source,console]
+.Starting AsyncBatchDaemon
+----
+# Set environment variables
+$ export GROUP_ID=G1
+
+# Start AsyncBatchDaemon
+$ java -cp dependency/* org.terasoluna.batch.async.db.AsyncBatchDaemon
+----
+
+[[Ch04_AsyncJobWithDB_HowToExtend_MultiDaemon]]
+=== Multiple runnings
+Asynchronous batch daemon is run on multiple servers for the following purposes.
+
+* Enhanced availability
+** It suffices if an asynchronous batch job can be executed on one of the servers, and it is to eliminate the situation that the job can not be run.
+* Enhanced performance
+** When batch processing load is to be distributed across multiple servers
+* Effective use of resources
+** When a specific job is to be distributed on a server with optimal resources when a variation is observed in the server performance
+*** Equivalent to dividing a job node based on group ID shown in <<Ch04_AsyncJobWithDB_HowToExtend_CustomTable>>
+
+An operational design must be adopted considering whether it can be used based on the viewpoints given above.
+
+.Schematic diagram for multiple starts
+image::Ch04_AsyncJobWithDB_MultipleActivation.png[]
+
+[NOTE]
+.When multiple asynchronous batch daemons fetch identical job request records
+====
+Since ``JobRequestPollTask`` performs exclusive control using optimistic locking, it can execute the job of the record fetched by asynchronous batch daemon which can update the polling status from INIT to POLLED.
+Other exclusive asynchronous batch daemons fetch next job request record.
+====
+
+
+[[Ch04_AsyncJobWithDB_Appendix]]
+== Appendix
+
+[[Ch04_AsyncJobWithDB_Appendix_Modular]]
+=== About modularization of job definition
+Although it is briefly explained in <<Ch04_AsyncJobWithDB_Arch_AppCtx>>, following events can be avoided by using ``AutomaticJobRegistrar``.
+
+* When same BeanID (BeanName) is used, Bean is overwritten and the job shows unintended behaviour.
+** Accordingly, there is a high risk of occurrence of unintended errors.
+* Naming should be performed to make all Bean IDs in the job unique, to avoid these errors.
+** As the number of job increases, it becomes difficult to manage the same resulting in unnecessary troubles.
+
+An event when ``AutomaticJobRegistrar`` is not used is explained.
+Since the contents explained here pose the issues given above, it is not used in asynchronous execution.
+
+[source,xml]
+.Job1.xml
+----
+<!-- Reader -->
+<!-- (1) -->
+<bean id="reader" class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+      p:queryId="jp.terasoluna.batch.job.repository.EmployeeRepositoy.findAll"
+      p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+<!-- Writer -->
+<!-- (2) -->
+<bean id="writer"
+      class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+      p:resource="file:#{jobParameters['basedir']}/input/employee.csv">
+  <property name="lineAggregator">
+    <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator">
+      <property name="fieldExtractor">
+        <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+              p:names="invoiceNo,salesDate,productId,customerId,quant,price"/>
+      </property>
+    </bean>
+  </property>
+</bean>
+
+
+<!-- Job -->
+<batch:job id="job1" job-repository="jobRepository">
+  <batch:step id="job1.step">
+    <batch:tasklet transaction-manager="transactionManager">
+      <batch:chunk reader="reader" writer="writer" commit-interval="100" />
+    </batch:tasklet>
+  </batch:step>
+</batch:job>
+----
+
+[source,xml]
+.Job2.xml
+----
+<!-- Reader -->
+<!-- (3) -->
+<bean id="reader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+      p:resource="file:#{jobParameters['basedir']}/input/invoice.csv">
+  <property name="lineMapper">
+    <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+      <property name="lineTokenizer">
+        <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+              p:names="invoiceNo,salesDate,productId,customerId,quant,price"/>
+      </property>
+      <property name="fieldSetMapper" ref="invoiceFieldSetMapper"/>
+    </bean>
+  </property>
+</bean>
+
+<!-- Writer -->
+<!-- (4) -->
+<bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+      p:statementId="jp.terasoluna.batch.job.repository.InvoiceRepository.create"
+      p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+<!-- Job -->
+<batch:job id="job2" job-repository="jobRepository">
+  <batch:step id="job2.step">
+    <batch:tasklet transaction-manager="transactionManager">
+      <batch:chunk reader="reader" writer="writer" commit-interval="100" />
+    </batch:tasklet>
+  </batch:step>
+</batch:job>
+----
+
+.async-batch-daemon.xml
+[source,xml]
+.Definition wherein BeanId is overwritten
+-----
+<bean id="automaticJobRegistrar"
+      class="org.springframework.batch.core.configuration.support.AutomaticJobRegistrar">
+    <property name="applicationContextFactories">
+        <bean class="org.springframework.batch.core.configuration.support.ClasspathXmlApplicationContextsFactoryBean">
+            <property name="resources">
+                <list>
+                    <value>classpath:/META-INF/jobs/other/async/*.xml</value>  <!-- (5) -->
+                </list>
+            </property>
+        </bean>
+    </property>
+    <property name="jobLoader">
+        <bean class="org.springframework.batch.core.configuration.support.DefaultJobLoader"
+              p:jobRegistry-ref="jobRegistry"/>
+    </property>
+</bean>
+
+<bean class="org.springframework.batch.core.configuration.support.JobRegistryBeanPostProcessor"
+    p:jobRegistry-ref="jobRegistry" />
+
+<import resource="classpath:/META-INF/jobs/async/*.xml" />   <!-- (6) -->
+-----
+
+[cols="10,90", options="header"]
+.List of setup points
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|In Job1, ItemReader which reads from the database is defined by a Bean ID - ``reader``.
+
+|(2)
+|In Job1, ItemWriter which writes in a file is defined by a Bean ID - ``writer``.
+
+|(3)
+|In Job2, ItemReader which reads from the file is defined by a Bean ID - ``reader``.
+
+|(4)
+|In Job2, ItemWriter which writes to a database is defined by a Bean ID - ``writer``.
+
+|(5)
+|``AutomaticJobRegistrar`` is set so as to read job definitions other than target jobs.
+
+|(6)
+|Use import of Spring and enable reading of target job definition.
+
+|===
+
+In this case, if Job1.xml and Job2.xml are read in the sequence, reader and writer to be defined by Job1.xml will be overwritten by Job2.xml definition. +
+As a result, when Job1 is executed, reader and writer of Job2 are used and intended processing cannot be performed.

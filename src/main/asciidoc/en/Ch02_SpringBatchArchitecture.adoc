@@ -1,0 +1,741 @@
+include::_include_all.adoc[]
+
+[[Ch02_SpringBatchArch]]
+= {SB} Architecture
+
+[[Ch02_SpringBatchArch_Overview]]
+== Overview
+{SB} architecture acting as a base for {server5_fullname} is explained.
+
+[[Ch02_SpringBatchArch_Overview_SpringBatch]]
+=== What is {SB}
+{SB}, as the name implies is a batch application framework.
+Following functions are offered based on DI container of Spring, AOP and transaction control function.
+
+Functions to standardize process flow::
+  Tasket model:::
+  Simple process::::
+  It is a method to freely describe a process. It is used in a simple cases like issuing SQL once, issuing a command etc  and the complex cases like performing processing while accessing multiple database or files, which are difficult to standardize.
+  Chunk model:::
+  Efficient processing of large amount of data::::
+  A method to collectively input/process/output a fixed amount of data. Process flow of data input/processing and
+  output is standardized and job can be implemented by implementing only a part of it.
+
+Various activation methods::
+  Execution is achieved by various triggers like command line execution, execution on Servlet and other triggers.
+
+I/O of various data formats::
+  Input and output for various data resources like file, database, message queue etc can be performed easily.
+
+Efficient processing::
+  Multiple execution, parallel execution, conditional branching are done based on the settings.
+
+Job execution control::
+  Permanence of execution, restart operation using data records as a standard can be performed.
+
+[[Ch02_SpringBatchArch_Overview_HelloWorld]]
+=== Hello, {SB}！
+
+If {SB} is not covered in understanding of {SB} architecture so far,
+the official documentation given below should be read.
+We would like you to get used to {SB} through creating simple application.
+
+https://spring.io/guides/gs/batch-processing/[Creating a Batch Service]
+
+[[Ch02_SpringBatchArch_Overview_BasicStructure]]
+=== Basic structure of {SB}
+Basic structure of {SB} is explained.
+
+{SB} defines structure of batch process. It is recommended to perform development after understanding the structure.
+
+.Primary components appearing in {SB}
+image::Ch02_SpringBatchArchitecture_Overview_MainComponents.png[{SB} Main Components]
+
+[cols=".^20,80", options="header"]
+.Primary components appearing in {SB}
+|===
+|Components
+|Roles
+
+|Job
+|A single execution unit that summarises a series of processes for batch application in {SB}.
+
+|Step
+|A unit of processing which constitutes Job. 1 job can contain 1~N steps +
+Reusing a process, parallelization, conditional branching can be performed by dividing 1 job process in multiple steps.
+Step is implemented by either chunk model or tasket model(will be described later).
+
+|JobLauncher
+|An interface for running a Job. +
+JobLauncher can be directly used by the user, however, a batch process can be started simply +
+by starting ``CommandLineJobRunner`` from java command.
+``CommandLineJobRunner`` undertakes various processes for starting JobLauncher.
+
+|ItemReader +
+ItemProcessor +
+ItemWriter
+|An interface for dividing into three processes - input/processing/output of data while implementing chunk model. +
+Batch application consists of processing of these 3 patterns and in {SB}, implementation of these interfaces
+is utilized primarily in chunk model. +
+User describes business logic by dividing it according to respective roles. +
+Since ItemReader and ItemWriter responsible for data input and output are often the processes that perform conversion of database and files to Java objects and vice versa, a standard implementation is provided by {SB}.
+In general batch applications which perform input and output of data from file and database, conditions
+can be satisfied just by using standard implementation of {SB} as it is. +
+ItemProcessor which is responsible for processing data implements input check and business logic.
+
+In Tasket model, ItemReader/ItemProcessor/ItemWriter substitutes a single Tasklet interface implementation. Input-Output, Input check and business logic all must be implemented in Tasklet.
+|JobRepository
+|A system to manage condition of Job and Step. The management information is persisted on the database based on the table schema specified by {SB}.
+|===
+
+[[Ch02_SpringBatchArch_Detail]]
+== Architecture
+Basic structure of {SB} is briefly explained in <<Ch02_SpringBatchArch_Overview>>.
+
+Following points are explained on this basis.
+
+* <<Ch02_SpringBatchArch_Detail_ProcessFlow>>
+* <<Ch02_SpringBatchArch_Detail_ExecutionOfJob>>
+* <<Ch02_SpringBatchArch_Detail_BusinessLogic>>
+* <<Ch02_SpringBatchArch_Detail_JobRepository_Metadata>>
+
+In the end, performance tuning points of batch application which use {SB} are explained.
+
+* <<Ch02_SpringBatchArch_Detail_Performance>>
+
+[[Ch02_SpringBatchArch_Detail_ProcessFlow]]
+=== Overall process flow
+Primary components of {SB} and overall process flow is explained.
+Further, explanation is also given about how to manage meta data of execution status of jobs.
+
+Primary components of {SB} and overall process flow (chunk model) are shown in the figure below.
+
+.Primary components of {SB} and overall process flow
+image::ch02/SpringBatchArchitecture/Ch02_SpringBatchArchitecture_Architecture_ProcessFlow.png[{SB} Process Flow]
+
+Main processing flow (black line) and the flow which persists job information (red line) are explained.
+
+.Main processing flow
+. JobLauncher is initiated from the job scheduler.
+. Job is executed from JobLauncher.
+. Step is executed from Job.
+. Step fetches input data by using ItemReader.
+. Step processes input data by using ItemProcessor.
+. Step outputs processed data by using ItemWriter.
+
+.A flow for persisting job information
+. JobLauncher registers JobInstance in Database through JobRepository.
+. JobLauncher registers that Job execution has started in Database through JobRepository.
+. JobStep updates miscellaneous information like counts of I/O records and status in Database through JobRepository.
+. JobLauncher registers that Job execution has completed in Database through JobRepository.
+
+
+Components and JobRepository focusing on persistence are explained freshly again.
+
+[cols=".^20,80", options="header"]
+.Components related to persistence
+|===
+|Components
+|Roles
+
+|JobInstance
+|{SB} indicates "logical" execution of a Job. JobInstance is identified by Job name and arguments.
+In other words, execution with identical Job name and argument is identified as execution of identical JobInstance and Job is executed as a continuation from previous activation. +
+When the target Job supports re-execution and the process was suspended in between due to error in the previous execution, the job is executed from the middle of the process.
+On the other hand, when the target job does not support re-execution or when the target JobInstance has already been successfully processed, exception is thrown and Java process is terminated abnormally.
+For example, JobInstanceAlreadyCompleteException is thrown when the process has already been completed successfully.
+
+|JobExecution +
+ExecutionContext
+|JobExecution indicates "physical" execution of Job. Unlike JobInstance, it is termed as another JobExecution even while re-executing identical Job. As a result, JobInstance and JobExecution shows one-to-many relationship. +
+ExecutionContext is considered as an area for sharing metadata such as progress of a process in identical JobExecution.
+ExecutionContext is primarily used for enabling {SB} to record framework status, however, means to access ExecutionContext by the application is also provided. +
+The object stored in the JobExecutionContext must be a class which implements ``java.io.Serializable``.
+
+|StepExecution +
+ExecutionContext
+|StepExecution indicates "physical" execution of Step. JobExecution and StepExecution shows one-to-many relationship. +
+Similar to JobExecution, ExecutionContext is an area for sharing data in Step. From the viewpoint of localization of data, information which is not required to be shared by multiple steps should use ExecutionContext of target step
+instead of using ExecutionContext of Job. +
+The object stored in StepExecutionContext must be a class which implements ``java.io.Serializable``.
+
+|JobRepository
+|A function to manage and persist data for managing execution results and status of batch application like JobExecution or StepExecution is provided. +
+In general batch applications, the process is started by starting a Java process and Java process is also terminated along with termination of process.
+Hence, since the data is likely to be referred across Java process, it is stored in volatile memory as well as permanent layers like database.
+When data is to be stored in the database, database objects like table or sequence are required for storing JobExecution or StepExecution. +
+It is necessary to generate a database object based on schema information provided by {SB}.
+
+|===
+
+{SB} heavily manages metadata in order to perform re-execution.
+A snapshot at the time of earlier execution must be retained and metadata and JobRepository should be used as a base in order to re-execute a batch process.
+
+[[Ch02_SpringBatchArch_Detail_ExecutionOfJob]]
+=== Running a Job
+How to run a Job is explained.
+
+A scenario is considered wherein a batch process is started immediately after starting Java process and Java process is terminated after completing a batch process.
+Figure below shows a process flow from starting a Java process till starting a batch process.
+
+.Process flow from starting a Java process till starting a batch process
+image::ch02/SpringBatchArchitecture/Ch02_SpringBatchArchitecture_Architecture_LaunchFlow.png[Job Launch Flow]
+
+.Starting a Java process and starting a Job
+A shell script to start Java is generally described to start a Job defined on {SB}, along with starting a Java process.
+When CommandLineJobRunner offered by {SB} is used, Job on {SB} defined by the user can be easily started.
+
+Start command of the Job which use CommandLineJobRunner is as shown below.
+
+[source,sh]
+.Start command when a Bean is defined by using XML
+----
+java -cp ${CLASSPATH} org.springframework.batch.core.launch.support.CommandLineJobRunner <jobPath> <jobName> <JobArgumentName1>=<value1> <JobArgumentName2>=<value2> ...
+----
+
+.Specifying a Job parameter
+CommandLineJobRunner can pass arguments (job parameters) as well along with Job name to be started.
+Arguments are specified in ``<Job argument name>=<Value>`` format as per the example described earlier.
+All the arguments are stored in JobExecution after conversion to JobParameters after interpreting and checking by CommandLineJobRunner or JobLauncher.
+For details, refer to <<Ch04_JobParameter.adoc#Ch04_JobParameter,running parameter of Job>>.
+
+.Register and restore JobInstance
+JobLauncher fetches Job name from JobRepository and JobInstance matching with the argument from the database.
+
+* When corresponding JobInstance does not exist, JobInstance is registered as new.
+* When corresponding JobInstance exists, the associated JobExecution is restored. +
+** In {SB}, for the jobs that can be executed repeatedly like daily execution etc, a method to add arguments only for making the JobInstance unique is listed.
+For example, adding system date or random number to arguments are listed. +
+For the method recommended in this guideline, refer <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_Converter,parameter conversion class>>.
+
+[[Ch02_SpringBatchArch_Detail_BusinessLogic]]
+=== Execution of business logic
+Job is divided into smaller units called steps in {SB}.
+When Job is started, Job activates already registered steps and generates StepExecution.
+Step is a framework for dividing the process till the end and execution of business logic is delegated to Tasket called from Step.
+
+Flow from Step to Tasklet is shown below.
+
+.Process flow from Step to Tasklet
+image::ch02/SpringBatchArchitecture/Ch02_SpringBatchArchitecture_Architecture_StepTaskletFlow.png[Step-Tasklet Flow]
+
+A couple of methods can be listed as the implementation methods of Tasklet - "Chunk model" and "Tasket model".
+Since the overview has already been explained, the structure will be now explained here.
+
+[[Ch02_SpringBatchArch_Detail_BusinessLogic_Chunk]]
+==== Chunk model
+As described above, chunk model is a method wherein the processing is performed in a certain number of units (chunks) rather than processing the data to be processed one by one unit.
+ChunkOrientedTasklet acts as a concrete class of Tasklet which supports the chunk processing.
+Maximum records of data to be included in the chunk (hereafter referred as "chunk size") can be adjusted by using setup value called commit-interval of this class.
+ItemReader, ItemProcessor and ItemWriter are all the interfaces based on chunk processing.
+
+Next, explanation is given about how ChunkOrientedTasklet calls the ItemReader, ItemProcessor and ItemWriter.
+
+A sequence diagram wherein ChunkOrientedTasklet processes one chunk is shown below.
+
+.Chunk processing by using ChunkOrientedTasklet
+image::Ch02_SpringBatchArchitecture_Architecture_Sequence_ChunkOrientedTasklet.png[Sequence of Chunk processing with ChunkOrientedTasklet]
+
+ChunkOrientedTasklet repeatedly executes ItemReader and ItemProcessor by the chunk size, in other words, reading and processing of data.
+After completing reading all the data of chunks, data writing process of ItemWriter is called only once and all the processed data in the chunks is passed.
+Data update processing is designed to be called once for chunks to enable easy organising like addBatch and executeBatch of JDBC.
+
+Next, ItemReader, ItemProcessor and ItemWriter which are responsible for actual processing in chunk processing are introduced.
+Although it is assumed that the user handles his own implementation for each interface, it can also be covered by a generic concrete class provided by {SB}.
+
+Especially, since ItemProcessor describes the business logic itself, the concrete classes are hardly provided by {SB}.
+ItemProcessor interface is implemented while describing the business logic.
+ItemProcessor is designed to allow types of objects used in I/O to be specified in respective generics so that typesafe programming is enabled.
+
+An implementation example of a simple ItemProcessor is shown below.
+
+[source,java]
+.Implementation example of ItemProcessor
+----
+public class MyItemProcessor implements
+      ItemProcessor<MyInputObject, MyOutputObject> {  // (1)
+  @Override
+    public MyOutputObject process(MyInputObject item) throws Exception {  // (2)
+
+        MyOutputObject processedObject = new MyOutputObject();  // (3)
+
+        // Coding business logic for item of input data
+
+    return processedObject; // (4)
+  }
+}
+----
+
+[cols="10,90", options="header"]
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Implement ItemProcessor interface which specifies the types of objects used for input and output.
+
+|(2)
+|Implement ``process`` method. Argument item is input data.
+
+|(3)
+|Create output object and store business logic results processed for the input data item.
+
+|(4)
+|Return output object.
+
+|===
+
+
+Various concrete classes are offered by {SB} for ItemReader or ItemWriter and these are used quite frequently.
+However, when a file of specific format is to be input or output, a concrete class which implements individual ItemReader or ItemWriter can be created and used.
+
+For implementation of business logic while developing actual application, refer <<Ch03_index.adoc#Ch03,application development flow>>.
+
+Representative concrete classes of ItemReader, ItemProcessor and ItemWriter offered by {SB} are shown in the end.
+
+[cols=".^15,25,60", options="header"]
+.Representative concrete classes of ItemReader, ItemProcessor and ItemReader offered by {SB}
+|===
+|Interface
+|Concrete class name
+|Overview
+
+.5+|ItemReader
+|FlatFileItemReader
+|Read flat files (non-structural files) like CSV file. Mapping rules for delimiters and objects can be customised by using Resource object as input.
+
+|StaxEventItemReader
+|Read XML file. As the name implies, it is an implementation which reads a XML file based on StAX.
+
+|JdbcPagingItemReader +
+JdbcCursorItemReader
+|Execute SQL by using JDBC and read records on the database. When a large amount of data is to be processed on the database, it is necessary to avoid reading all the records on memory, and to read and discard only the data necessary for one processing. +
+JdbcPagingItemReader is implemented by dividing SELECT SQL for each page by using JdbcTemplate and then issuing the same. On the other hand, JdbcCursorItemReader is implemented by issuing one SELECT SQL by using JDBC cursor. +
+icon:warning[] Using MyBatis is considered as a base in {batch5_shortname}.
+
+|MyBatisCursorItemReader +
+MyBatisPagingItemReader
+|Read records on the database in coordination with MyBatis. Spring coordination library offered by MyBatis is provided by MyBatis-Spring. For the difference between Paging and Cursor, it is same as JdbcXXXItemReader except for using MyBatis for implementation.+
+In addition, JpaPagingItemReader, HibernatePagingItemReader and HibernateCursor are provided which reads records on the database by coordinating with ItemReaderJPA implementation or Hibernate.
+
+icon:warning[] Using ``MyBatisCursorItemReader`` is considered as a base in {batch5_shortname}.
+
+|JmsItemReader +
+AmqpItemReader
+|Receive messages from JMS or AMQP and read the data contained in the same.
+
+.3+|ItemProcessor
+|PassThroughItemProcessor
+|No operation is performed. It is used when processing and modification of input data is not required.
+
+|ValidatingItemProcessor
+|Performs input check. It is necessary to implement {SB} specific org.springframework.batch.item.validator.Validator for the implementation of input check rules, however, +
+SpringValidator which is an adaptor of a generalorg.springframework.validation.Validator offered by Spring is provided
+and rules of org.springframework.validation.Validator can be used. +
+icon:warning[] Use of ValidatingItemProcessor is prohibited in {batch5_shortname}. +
+For details, refer <<Ch06_InputValidation.adoc#Ch06_InputValidation,Input check>>.
+
+|CompositeItemProcessor
+|Sequentially execute multiple ItemProcessor for identical input data. It is enabled when business logic is to be executed after performing input check using ValidatingItemProcessor.
+
+.5+|ItemWriter
+|FlatFileItemWriter
+|Write processed Java object as a flat file like CSV file. Mapping rules for file lines can be customised from delimiters and objects.
+
+|StaxEventItemWriter
+|Write processed Java object as a XML file.
+
+|JdbcBatchItemWriter
+|Execute SQL by using JDBC and output processed Java object to database. Internally JdbcTemplate is used.
+
+|MyBatisBatchItemWriter
+|Coordinate with MyBatis and output processed Java object to the database. It is provided by Spring coordination library MyBatis-Spring offered by MyBatis. +
+icon:warning[] JPA implementation or JpaItemWriter and HibernateItemWriter for Hibernate is not used in {batch5_shortname}.
+
+|JmsItemWriter +
+AmqpItemWriter
+|Send a message of a processed Java object with JMS or AMQP.
+
+|===
+
+[NOTE]
+.PassThroughItemProcessor omitted
+====
+When a job is defined in XML, ItemProcessor setting can be omitted.
+When it is omitted, input data is passed to ItemWriter without performing any operation similar to PassThroughItemProcessor.
+
+[source,xml]
+.ItemProcessor omitted
+----
+<batch:job id="exampleJob">
+    <batch:step id="exampleStep">
+        <batch:tasklet>
+            <batch:chunk reader="reader" writer="writer" commit-interval="10" />
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+====
+
+[[Ch02_SpringBatchArch_Detail_BusinessLogic_Tasklet]]
+==== Tasket model
+Chunk model is a framework suitable for batch applications that read multiple input data one by one and perform a series of processing.
+However, a process which does not fit with the type of chunk processing is also implemented.
+For example, when system command is to be executed and when only one record of table for control is to be updated.
+
+In such a case, merits of efficiency obtained by chunk processing are very less
+and demerits owing to difficult design and implementation are significant. Hence, it is rational to use tasket model.
+
+It is necessary for the user to implement Tasket interface provided by {SB} while using a Tasket model.
+Further, following concrete class is provided in {SB}, subsequent description is not given in {batch5_shortname}.
+
+[cols=".^30,70", options="header"]
+.Concrete class of Tasket offered by {SB}
+|===
+|Class name
+|Overview
+
+|SystemCommandTasklet
+|Tasket to execute system commands asynchronously. Command to be specified in the command property is specified. +
+Since the system command is executed by a thread different from the thread for calling, it is possible to set a timeout and cancel the execution thread of the system command during the process.
+
+|MethodInvokingTaskletAdapter
+|Tasket for executing specific methods of POJO class. Specify Bean of target class in targetObject property and name of the method to be executed in targetMethod property. +
+POJO class can return batch process termination status as a return value of the method, however then the ExitStatus described later must be set as a return value.
+When a value of another type is returned, the status is considered as "normal termination (ExistStatus: COMPLETED) regardless of the return value.
+|===
+
+[[Ch02_SpringBatchArch_Detail_JobRepository_Metadata]]
+=== Metadata schema of JobRepository
+Metadata schema of JobRepository is explained.
+
+Note that, overall picture is explained including the contents explained in {SB} reference
+http://docs.spring.io/spring-batch/trunk/reference/html/metaDataSchema.html[Appendix B. Meta-Data Schema]
+
+
+{SB} metadata table corresponds to a domain object (Entity object) which are represented by Java.
+
+[cols="30,30,40"]
+.Correspondence list
+|===
+|Table
+|Entity object
+|Overview
+
+|BATCH_JOB_INSTANCE
+|JobInstance
+|Retains the string which serialises job name and job parameter.
+
+|BATCH_JOB_EXECUTION
+|JobExecution
+|Retains job status and execution results.
+
+|BATCH_JOB_EXECUTION_PARAMS
+|JobExecutionParams
+|Retains job parameters assigned at the startup.
+
+|BATCH_JOB_EXECUTION_CONTEXT
+|JobExecutionContext
+|Retains the context inside the job.
+
+|BATCH_STEP_EXECUTION
+|StepExecution
+|Retains status and execution results of step, number of commits and rollbacks.
+
+|BATCH_STEP_EXECUTION_CONTEXT
+|StepExecutionContext
+|Retains context inside the step.
+
+|===
+
+JobRepository is responsible for accurately storing the contents stored in each Java object, in the table.
+
+[IMPORTANT]
+.Regarding the character string stored in the meta data table
+====
+Character string stored in the meta data table allows only a restricted number of characters and when this limit is exceeded, character string is truncated. +
+Note that, multibyte characters are not taken into consideration in {SB} and an error is likely to occur in DDL of meta data table offered by {SB} even if character string to be stored is within the character limit.
+It is necessary to extend the size by encoding using a column of meta data table, and to set the character data type in character count definition, in order to store multibyte characters.
+
+``Oracle Schema`` provided by {SB} offers a DDL for Oracle in {batch5_shortname} that explicitly sets character data type in character count definition
+since character data type of database is defined by default number of bytes. +
+DDL to be offered is included in the org.terasoluna.batch package which is included in jar of {batch5_shortname}.
+====
+
+6 ERD models of all the tables and interrelations are shown below.
+
+.ER diagram
+image::Ch02_SpringBatchArchitecture_Architecture_ER.png[ER Diagram]
+
+[[Ch02_SpringBatchArch_Detail_JobRepository_Metadata_Version]]
+==== Version
+Majority of database tables contain version columns.
+This column is important since {SB} adopts an optimistic locking strategy to handle updates to database.
+This record signifies that it is updated when the value of the version is incremented.
+When JobRepository updates the value and the version number is changed, an OptimisticLockingFailureException which indicates an occurrence of simultaneous access error is thrown.
+Other batch jobs may be running on a different machines, however, all the jobs use the same database, hence this check is required.
+
+[[Ch02_SpringBatchArch_Detail_JobRepository_Metadata_SequenceID]]
+==== ID (Sequence) definition
+BATCH_JOB_INSTANCE, BATCH_JOB_EXECUTION and BATCH_STEP_EXECUTION all contain column ending with _ID.
+These fields act as a primary key for respective tables.
+However, these keys are not generated in the database but are rather generated in a separate sequence.
+After inserting one of the domain objects in the database, the keys which assign the domain objects should be set in the actual objects so that they can be uniquely identified in Java. +
+Sequences may not be supported depending on the database. In this case, a table is used instead of each sequence.
+
+[[Ch02_SpringBatchArch_Detail_JobRepository_Metadata_TableDefinition]]
+==== Table definition
+Explanation is given for each table item.
+
+===== BATCH_JOB_INSTANCE
+BATCH_JOB_INSTANCE table retains all the information related to JobInstance and is at top level of the overall hierarchy.
+
+[cols="30,70", options="header"]
+.BATCH_JOB_INSTANCE definition
+|===
+|Column name
+|Description
+
+|JOB_INSTANCE_ID
+|A primary key which is a unique ID identifying an instance.
+
+|VERSION
+|Refer <<Ch02_SpringBatchArch_Detail_JobRepository_Metadata_Version>>.
+
+|JOB_NAME
+|Job name. A non-null value since it is necessary for identifying an instance.
+
+|JOB_KEY
+|JobParameters which are serialised for uniquely identifying same job as a different instance. +
+JobInstances with the same job name must contain different JobParameters (in other words, varying JOB_KEY values).
+
+|===
+
+===== BATCH_JOB_EXECUTION
+BATCH_JOB_EXECUTION table retains all the information related to JobExecution object.
+When a job is executed, new rows are always registered in the table with new JobExecution.
+
+[cols="30,70", options="header"]
+.BATCH_JOB_EXECUTION definition
+|===
+|Column name
+|Description
+
+|JOB_EXECUTION_ID
+|Primary key that uniquely identifies this job execution.
+
+|VERSION
+|Refer <<Ch02_SpringBatchArch_Detail_JobRepository_Metadata_Version>>.
+
+|JOB_INSTANCE_ID
+|Foreign key from BATCH_JOB_INSTANCE table which shows an instance wherein the job execution belongs.
+Multiple executions are likely to exist for each instance.
+
+|CREATE_TIME
+|Time when the job execution was created.
+
+|START_TIME
+|Time when the job execution was started.
+
+|END_TIME
+|Indicates the time when the job execution was terminated regardless of whether it was successful or failed. +
+Even though the job is not running currently, the column value is empty which indicates there are several error types and the framework was unable to perform last save operation.
+
+|STATUS
+|A character string which indicates job execution status. It is a character string output by BatchStatus enumeration object.
+
+
+|EXIT_CODE
+|A character string which indicates an exit code of job execution. When it is activated by CommandLineJobRunner, it can be converted to a numeric value.
+
+|EXIT_MESSAGE
+|A character string which explains job termination status in detail.
+When a failure occurs, a character string that includes as many as stack traces as possible is likely.
+
+|LAST_UPDATED
+|Time when job execution of the record was last updated.
+
+|===
+
+===== BATCH_JOB_EXECUTION_PARAMS
+BATCH_JOB_EXECUTION_PARAMS table retains all the information related to JobParameters object.
+It contains a pair of 0 or more keys passed to the job and the value and records the parameters by which the job was executed.
+
+[cols="30,70", options="header"]
+.BATCH_JOB_EXECUTION_PARAMS definition
+|===
+|Column name
+|Description
+
+|JOB_EXECUTION_ID
+|Foreign key from  BATCH_JOB_EXECUTION table which executes this job wherein the job parameter belongs.
+
+|TYPE_CD
+|A character string which indicates that the data type is string, date, long or double.
+
+|KEY_NAME
+|Parameter key.
+
+|STRING_VAL
+|Parameter value when data type is string.
+
+|DATE_VAL
+|Parameter value when data type is date.
+
+|LONG_VAL
+|Parameter value when data type is an integer.
+
+|DOUBLE_VAL
+|Parameter value when data type is a real number.
+
+|IDENTIFYING
+|A flag which indicates that the parameter is a value to identify that the job instance is unique.
+
+|===
+
+===== BATCH_JOB_EXECUTION_CONTEXT
+BATCH_JOB_EXECUTION_CONTEXT table retains all the information related to ExecutionContext of Job.
+It contains all the job level data required for execution of specific jobs.
+The data indicates the status that must be fetched when the process is to be executed again after a job failure and enables the failed job to start from the point where processing has stopped.
+
+[cols="30,70", options="header"]
+.BATCH_JOB_EXECUTION_CONTEXT definition
+|===
+|Column name
+|Description
+
+|JOB_EXECUTION_ID
+|A foreign key from BATCH_JOB_EXECUTION table which indicates job execution wherein ExecutionContext of Job belongs.
+
+|SHORT_CONTEXT
+|A string representation of SERIALIZED_CONTEXT.
+
+
+|SERIALIZED_CONTEXT
+|Overall serialised context.
+
+|===
+
+===== BATCH_STEP_EXECUTION
+BATCH_STEP_EXECUTION table retains all the information related to StepExecution object.
+This table very similar to BATCH_JOB_EXECUTION table in many ways. When each JobExecution is created, at least one entry exists for each Step.
+
+[cols="30,70", options="header"]
+.BATCH_STEP_EXECUTION definition
+|===
+|Column name
+|Description
+
+|STEP_EXECUTION_ID
+|Primary key that uniquely identifies the step execution.
+
+|VERSION
+|Refer <<Ch02_SpringBatchArch_Detail_JobRepository_Metadata_Version>>.
+
+|STEP_NAME
+|Step name.
+
+|JOB_EXECUTION_ID
+|Foreign key from  BATCH_JOB_EXECUTION table which indicates JobExecution wherein StepExecution belongs
+
+|START_TIME
+|Time when step execution was started.
+
+|END_TIME
+|Indicates time when step execution ends regardless of whether it is successful or failed. +
+Even though the job is not running currently, the column value is empty which indicates there are several error types and the framework was unable to perform last save operation.
+
+|STATUS
+|A character string that represents status of step execution. It is a string which outputs BatchStatus enumeration object.
+
+|COMMIT_COUNT
+|Number of times a transaction is committed.
+
+|READ_COUNT
+|Data records read by ItemReader.
+
+|FILTER_COUNT
+|Data records filtered by ItemProcessor.
+
+|WRITE_COUNT
+|Data records written by ItemWriter.
+
+|READ_SKIP_COUNT
+|Data records skipped by ItemReader.
+
+|WRITE_SKIP_COUNT
+|Data records skipped by ItemWriter.
+
+|PROCESS_SKIP_COUNT
+|Data records skipped by ItemProcessor.
+
+
+|ROLLBACK_COUNT
+|Number of times a transaction is rolled back.
+
+|EXIT_CODE
+|A character string which indicates exit code for step execution. When it is activated by using CommandLineJobRunner, it can be changed to a numeric value.
+
+|EXIT_MESSAGE
+|A character string which explains step termination status in detail.
+When a failure occurs, a character string that includes as many as stack traces as possible is likely.
+
+|LAST_UPDATED
+|Time when the step execution of the record was last updated.
+
+|===
+
+===== BATCH_STEP_EXECUTION_CONTEXT
+BATCH_STEP_EXECUTION_CONTEXT table retains all the information related to ExecutionContext of Step.
+It contains all the step level data required for execution of specific steps.
+The data indicates the status that must be fetched when the process is to be executed again after a job failure and enables the failed job to start from the point where processing has stopped.
+
+[cols="30,70", options="header"]
+.BATCH_STEP_EXECUTION_CONTEXT definition
+|===
+|Column name
+|Description
+
+|STEP_EXECUTION_ID
+|Foreign key from  BATCH_STEP_EXECUTION table which indicates job execution wherein ExecutionContext of Step belongs.
+
+|SHORT_CONTEXT
+|String representation of SERIALIZED_CONTEXT.
+
+
+|SERIALIZED_CONTEXT
+|Overall serialized context.
+
+|===
+
+==== DDL script
+JAR file of {SB} Core contains a sample script which creates a relational table corresponding to several database platforms.
+These scripts can be used as it is or additional index or constraints can be changed as required. +
+The script is included in the package of org.springframework.batch.core and the file name is configured by ``schema-\*.sql``.
+"*" is the short name for Target Database Platform..
+
+[[Ch02_SpringBatchArch_Detail_Performance]]
+=== Typical performance tuning points
+Typical performance tuning points in {SB} are explained.
+
+Adjustment of chunk size::
+ Chunk size is increased to reduce overhead occurring due to resource output. +
+ However, if chunk size is too large, it increases load on the resources resulting in deterioration in the performance. Hence, chunk size must be adjusted to a moderate value.
+
+
+Adjustment of fetch size::
+  Fetch size (buffer size) for the resource is increased to reduce overhead occurring due to input from resources.
+
+Reading of a file efficiently::
+  When BeanWrapperFieldSetMapper is used, a record can be mapped to the Bean only by sequentially specifying Bean class and property name.
+  However, it takes time to perform complex operations internally. Processing time can be reduced by using  dedicated FieldSetMapper interface implementation which performs mapping. +
+  For file I/O details, refer <<Ch05_FileAccess.adoc#Ch05_FileAccess,"File access">>.
+
+Parallel processing, Multiple processing::
+  {SB} supports parallel processing of Step execution and multiple processing by using data distribution. Parallel processing or multiple processing can be performed and the performance can be improved by running the processes in parallel.
+  However, if number of parallel processes and multiple processes is too large, load on the resources increases resulting in deterioration of performance. Hence, size must be adjusted to a moderate value. +
+  For details of parallel and multiple processing, refer <<Ch08_ParallelAndMultiple.adoc#Ch08_ParallelAndMultiple,"parallel processing and multiple processing>>.
+
+Reviewing distributed processing::
+  {SB} also supports distributed processing across multiple machines. Guidelines are same as parallel and multiple processing. +
+  Distributed processing will not be explained in this guideline since the basic design and operational design are complex.

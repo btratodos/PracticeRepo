@@ -1,0 +1,12 @@
+include::_include_all.adoc[]
+
+[[Ch02]]
+= TERASOLUNA Batch Framework for Java (5.x) concept
+
+. <<Ch02_GeneralBatchProcessing.adoc#, General batch process system >>
+
+. <<Ch02_TerasolunaBatchStack.adoc#,TERASOLUNA Batch Framework for Java (5.x) stack>>
+
+. <<Ch02_SpringBatchArchitecture.adoc#, {SB} architecture>>
+
+. <<Ch02_TerasolunaBatchArchitecture.adoc#,TERASOLUNA Batch Framework for Java (5.x) architecture>>

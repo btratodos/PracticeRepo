@@ -1,0 +1,733 @@
+include::_include_all.adoc[]
+
+[[Ch04_JobParameter]]
+= Job parameters
+
+[[Ch04_JobParameter_Overview]]
+== Overview
+
+This section explains about using the job parameter (hereafter referred to as 'parameter').
+
+The usage method of this function is same in the chunk model as well as tasklet model.
+
+A parameter is used to flexibly switch the operation of the job according to the execution environment and execution timing as shown below.
+
+* File path of process target
+* System operation date and time
+
+The following explanation is about assigning parameters.
+
+. <<Ch04_JobParameter_HowToUse_CLIArgs>>
+. <<Ch04_JobParameter_HowToUse_FromFile>>
+
+The specified parameters can be referred in Bean definition or in Java under Spring management.
+
+[[Ch04_JobParameter_HowToUse]]
+== How to use
+
+[[Ch04_JobParameter_HowToUse_Converter]]
+=== Regarding parameter conversion class
+
+In {SB}, the received parameters are processed in the following sequence.
+
+. The implementation class of ``JobParametersConverter`` convert to ``JobParameters``.
+. Refer to the parameters from ``JobParameters`` in Bean definition and Java under Spring management.
+
+.Regarding implementation class of parameter conversion class
+
+Multiple implementation classes of the above mentioned ``JobParametersConverter`` are provided.
+The features of each class are shown below.
+
+* DefaultJobParametersConverter
+** It can specify the data type of parameters(4 types; String, Long, Date, Double).
+
+* JsrJobParametersConverter
+** It cannot specify the data type of parameters (Only String).
+** It assigns ID (RUN_ID) that identifies job execution to parameter with the name ``jsr_batch_run_id`` automatically.
+*** It increments the RUN_ID each time the job is executed. Since it uses SEQUENCE (name is `` JOB_SEQ``) of the database for incrementing, the name does not overlap.
+*** In {SB}, runnaing the job by the same parameters is identified as the same job and the same job can be executed only once.
+    Whereas, adding a unique value to the parameter name ``jsr_batch_run_id`` will recognize it as a separate job.
+    Refer to <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch, {SB} architecture>> for details.
+
+In {SB}, when the implementation class of ``JobParametersConverter`` to be used in Bean definition, is not specified, ``DefaultJobParametersConverter`` is used. +
+However, in {batch5_shortname}, ``DefaultJobParametersConverter`` is not used due to the following reasons.
+
+* It is common to run one job by the same parameter at different timing.
+* It is possible to specify the time stamp of the start time and manage them as different jobs, but it is complicated to specify job parameters only for that purpose.
+* ``DefaultJobParametersConverter`` can specify data types for parameters, but handling becomes complicated when type conversion fails.
+
+In {batch5_shortname}, by using ``JsrJobParametersConverter``, RUN_ID is automatically assigned without the user knowledge.
+By this, the same job is handled as a different job in {SB} as seen by the user.
+
+.About setting of parameter conversion class
+
+In {batch5_shortname}, it is set in advance so as to use ``JsrJobParametersConverter`` in ``launch-context.xml``. +
+Therefore, when {batch5_shortname} is used with the recommended setting, there is no need to set `` JobParametersConverter``.
+
+[source, xml]
+.META-INF\spring\launch-context.xml
+----
+<bean id="jobParametersConverter"
+      class="org.springframework.batch.core.jsr.JsrJobParametersConverter"
+      c:dataSource-ref="adminDataSource" />
+
+<bean id="jobOperator"
+      class="org.springframework.batch.core.launch.support.SimpleJobOperator"
+      p:jobRepository-ref="jobRepository"
+      p:jobRegistry-ref="jobRegistry"
+      p:jobExplorer-ref="jobExplorer"
+      p:jobParametersConverter-ref="jobParametersConverter"
+      p:jobLauncher-ref="jobLauncher" />
+----
+
+The following description assumes that JsrJobParametersConverter is used.
+
+[[Ch04_JobParameter_HowToUse_CLIArgs]]
+=== Assign from command-line arguments
+
+Firstly, how to assign from the most basic command-line arguments, is explained.
+
+.Assignment of parameters
+
+Command-line arguments are enumerated in the ``<Parameter name>=<Value>`` format after 3rd argument of ``CommandLineJobRunner``.
+
+The number and length of parameters are not restricted in {SB} and {batch 5 _ shortname}.
+However, there are restrictions in the length of command arguments in the OS. +
+Therefore, when a large number of arguments is required, the method of <<Ch04_JobParameter_HowToUse_FromFile>> and
+<<Ch04_JobParameter_HowToExtends_PropertyConbination>> should be used.
+
+[source, console]
+.Example of setting parameters as command-line arguments
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID param1=abc outputFileName=/tmp/result.csv
+----
+
+.Refer to parameters
+
+Parameters can be referred in Bean definition or in Java as shown below.
+
+* Refer in Bean definition
+** It can be referred by ``#{jobParameters['xxx']}``
+* Refer in Java
+** It can be referred by ``@Value("#{jobParameters['xxx']}")``
+
+[IMPORTANT]
+.The scope of the Bean that refers to JobParameters should be Step scope
+====
+When referring to `` JobParameters``, the scope of the Bean to be referred should be set to `` Step`` scope.
+This is for using the mechanism of **late binding** of {SB} when `` JobParameters`` is to be referred.
+
+As its name implies, **late binding** is setting of the delayed value.
+`` ApplicationContext`` of Spring Framework generates an instance of `` ApplicationContext`` after resolving the properties of various Beans by default.
+{SB} does not resolve the property at the time of generating an instance of `` ApplicationContext``. It has a function
+to resolve the property when various Beans are required. This is what the word **Delay** means.
+With this function, after generating and executing `` ApplicationContext`` required for executing the {SB} itself,
+it is possible to alter the behavior of various Beans according to parameters.
+
+``Step`` scope is a unique scope of {SB} and a new instance is generated for each Step execution.
+The value with **late binding** can be resolved by using SpEL expression in Bean definition.
+====
+
+[IMPORTANT]
+.@StepScope annotation cannot be used for specifying Step scope
+====
+In {SB}, ``@StepScope`` is provided as the annotation that specifies ``Step`` scope. However,
+this is an annotation that can only be used in JavaConfig.
+
+Therefore, specify the  `` Step`` scope in {batch5_shortname} by any one of the following methods.
+
+. In Bean definition, assign ``scope="step"`` to Bean.
+. In Java, assign ``@Scope("step")`` to class.
+====
+
+[source, xml]
+.Example of referring to the parameter assigned by the command-line arguments in Bean definition
+----
+<!-- (1) -->
+<bean id="reader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+      p:resource="file:#{jobParameters['inputFile']}">  <!-- (2) -->
+    <property name="lineMapper">
+        <!-- omitted settings -->
+    </property>
+</bean>
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify scope as scope attribute in bean tag.
+
+|(2)
+|Specify the parameter to be referred.
+
+|===
+
+[source, java]
+.Example of referring to the parameter assigned by the command-line arguments in Java
+----
+@Component
+@Scope("step")  // (1)
+public class ParamRefInJavaTasklet implements Tasklet {
+
+    /**
+     * Holds a String type value
+     */
+    @Value("#{jobParameters['str']}")  // (2)
+    private String str;
+
+    // omitted execute()
+}
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify scope by assigning ``@Scope`` annotation in class.
+
+|(2)
+|Specify the parameter to be referred by using ``@Value`` annotation.
+|===
+
+[[Ch04_JobParameter_HowToUse_FromFile]]
+=== Redirect from file to standard input
+
+How to redirect from file to standard input is explained.
+
+.Creation of file for defining parameters
+
+Define the parameters in the files as follows.
+
+[source, txt]
+.params.txt
+----
+param1=abc
+outputFile=/tmp/result.csv
+----
+
+.Redirect the files wherein parameters are defined to standard input
+
+Redirect the files wherein parameters are defined as command-line arguments.
+
+[source, console]
+.Execution method
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID < params.txt
+----
+
+.Refer to parameters
+
+How to refer to the parameters is same as the <<Ch04_JobParameter_HowToUse_CLIArgs>> method.
+
+[[Ch04_JobParameter_HowToUse_DefaultValue]]
+=== Set the default value of parameter
+
+When parameters are optional, default values can be set in the following format.
+
+* ``#{jobParameters['Parameter name'] ?: Default value}``
+
+However, in the item where the value is set using parameters, the default values can also differ with the environment and execution timing  same as the parameters.
+
+Firstly, how to hardcode the default values in source code is explained.
+However, there are many cases where it is better to use <<Ch04_JobParameter_HowToExtends_PropertyConbination>>, so refer them also.
+
+.Refer to the parameter wherein default value is set
+
+When the relevant parameter is not set, the value set as the default value is referred.
+
+[source, xml]
+.Example of referring to the parameter assigned by the command-line arguments in Bean definition
+----
+<!-- (1) -->
+<bean id="reader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+      p:resource="file:#{jobParamaters[inputFile] ?: /input/sample.csv}">  <!-- (2) -->
+    <property name="lineMapper">
+        // omitted settings
+    </property>
+</bean>
+
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the scope as scope attribute in the bean tag.
+
+|(2)
+|Specify the parameter to be referred. +
+``/input/sample.csv`` is set as the default value.
+
+|===
+
+[source, java]
+.Example of referring to the parameter assigned by the command-line arguments in Java
+----
+@Component
+@Scope("step")  // (1)
+public class ParamRefInJavaTasklet implements Tasklet {
+
+    /**
+     * Holds a String type value
+     */
+    @Value("#{jobParameters['str'] ?: 'xyz'}")  // (2)
+    private String str;
+
+    // omitted execute()
+}
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the scope by assigning ``@Scope`` annotation in class.
+
+|(2)
+|Specify the parameter to be referred by using ``@Value`` annotation. +
+``xyz`` is set as the default value.
+|===
+
+[[Ch04_JobParameter_HowToUse_ParamsValidation]]
+=== Validation of parameters
+
+Validation of the parameters is required at job launch in order to prevent operation errors or unintended behavior. +
+Validation of parameters can be implemented by using the ``JobParametersValidator`` provided by {SB}.
+
+Since parameters are referred at various places such as ItemReader/ItemProcessor/ItemWriter,
+validation is performed immediately after the job is launched.
+
+There are two ways to verify the validity of a parameter, and it differs with the degree of complexity of the verification.
+
+* <<Ch04_JobParameter_HowToUse_ParamsValidation_Default>>
+** Application example
+*** Verify that the required parameters are set
+*** Verify that the unspecified parameters are not set
+** Validator to be used
+*** ``DefaultJobParametersValidator`` provided by {SB}
+
+* <<Ch04_JobParameter_HowToUse_ParamsValidation_Origin>>
+** Application example
+*** Numerical value range verification and complex verification such as correlation check between parameters
+*** Verification that cannot be done by ``DefaultJobParametersValidator`` provided by {SB}
+** Validator to be used
+*** Class wherein ``JobParametersValidator`` is implemented independently
+
+How to verify the validity of <<Ch04_JobParameter_HowToUse_ParamsValidation_Default>> and <<Ch04_JobParameter_HowToUse_ParamsValidation_Origin>> is explained respectively.
+
+[[Ch04_JobParameter_HowToUse_ParamsValidation_Default]]
+==== Simple validation
+
+{SB} provides ``DefaultJobParametersValidator`` as the default implementation of ``JobParametersValidator``. +
+This validator can verify the following as per the settings.
+
+* Required parameters should be set
+* Parameters other than required or optional should not be specified
+
+Definition example is shown as follows.
+
+[source, xml]
+.Definition of validation that uses DefaultJobParametersValidator
+----
+<!-- (1) -->
+<bean id="jobParametersValidator"
+      class="org.springframework.batch.core.job.DefaultJobParametersValidator">
+  <property name="requiredKeys">  <!-- (2) -->
+    <list>
+        <value>jsr_batch_run_id</value>  <!-- (3) -->
+        <value>inputFileName</value>
+        <value>outputFileName</value>
+    </list>
+  </property>
+  <property name="optionalKeys">  <!-- (4) -->
+    <list>
+        <value>param1</value>
+        <value>param2</value>
+    </list>
+  </property>
+</bean>
+
+<batch:job id="jobUseDefaultJobParametersValidator" job-repository="jobRepository">
+  <batch:step id="jobUseDefaultJobParametersValidator.step01">
+    <batch:tasklet ref="sampleTasklet" transaction-manager="jobTransactionManager"/>
+  </batch:step>
+  <batch:validator ref="jobParametersValidator"/>  <!-- (5) -->
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define Bean for ``DefaultJobParametersValidator``.
+
+|(2)
+|Set the required parameters to property ``requiredKeys``. +
+Multiple parameter names of the required parameters can be specified using list tag.
+
+|(3)
+|Set ``jsr_batch_run_id`` to the required parameters. +
+In {batch5_shortname}, this setting is mandatory when using ``DefaultJobParametersValidator``. +
+The reason for making the setting mandatory is explained later.
+
+|(4)
+|Set optional parameters to property ``optionalKeys``. +
+Multiple parameter names of the optional parameters can be specified using list tag.
+
+|(5)
+|Apply the validator to the job using validator tag in the job tag.
+|===
+
+[IMPORTANT]
+.Required parameters that cannot be omitted in {batch5_shortname}
+====
+`` JsrJobParametersConverter`` is used for parameter conversion in {batch 5 _ shortname}, so the following parameters are always set.
+
+* ``jsr_batch_run_id``
+
+Therefore, ``jsr_batch_run_id`` should be included in the ``requiredKeys``. +
+Refer to <<Ch04_JobParameter_HowToUse_Converter>> for detailed explanation.
+
+[source, xml]
+.Example of parameter definition
+----
+<bean id="jobParametersValidator"
+      class="org.springframework.batch.core.job.DefaultJobParametersValidator">
+  <property name="requiredKeys">
+    <list>
+        <value>jsr_batch_run_id</value>  <!-- mandatory -->
+        <value>inputFileName</value>
+        <value>outputFileName</value>
+    </list>
+  </property>
+  <property name="optionalKeys">
+    <list>
+        <value>param1</value>
+        <value>param2</value>
+    </list>
+  </property>
+</bean>
+----
+====
+
+.OK case and NG case when DefaultJobParametersValidator is used
+
+An example when the verification result is OK and NG are shown to understand the verification possible conditions in ``DefaultJobParametersValidator``.
+
+[source, xml]
+.DefaultJobParametersValidator definition example
+----
+<bean id="jobParametersValidator"
+    class="org.springframework.batch.core.job.DefaultJobParametersValidator"
+    p:requiredKeys="outputFileName"
+    p:optionalKeys="param1"/>
+----
+
+[source, console]
+.NG case1
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID param1=aaa
+----
+
+NG as the required parameter ``outputFile`` is not set.
+
+[source, console]
+.NG case 2
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID outputFileName=/tmp/result.csv param2=aaa
+----
+
+NG as the parameter `` param2`` which is not specified for either the required parameter or the optional parameter is set.
+
+[source, console]
+.OK case 1
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID param1=aaa outputFileName=/tmp/result.csv
+----
+
+OK as the parameters specified as required and optional are set.
+
+[source, console]
+.OK case 2
+----
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID fileoutputFilename=/tmp/result.csv
+----
+
+OK as the required parameters are set and there is no need to set optional parameters.
+
+[[Ch04_JobParameter_HowToUse_ParamsValidation_Origin]]
+==== Complex validation
+
+Implementing ``JobParametersValidator`` interface independently
+helps in verifying the parameters as per requirements.
+
+Implement ``JobParametersValidator`` class as follows.
+
+* Implement ``JobParametersValidator`` class and override validate method
+* Implement validate method as follows
+** Fetch each parameter from ``JobParameters`` and verify
+*** If the verification result is OK, there is no need to perform any operation
+*** If verification result is NG, throw ``JobParametersInvalidException``
+
+Implementation example of ``JobParametersValidator`` class is shown.
+In this case, it is verified that the length of the string specified by `` str`` is less than or equal to the number specified by `` num``.
+
+[source, java]
+.Implementation example of JobParametersValidator interface
+----
+public class ComplexJobParametersValidator implements JobParametersValidator {  // (1)
+    @Override
+    public void validate(JobParameters parameters) throws JobParametersInvalidException {
+        Map<String, JobParameter> params = parameters.getParameters();  // (2)
+
+        String str = params.get("str").getValue().toString();  // (3)
+        int num = Integer.parseInt(params.get("num").getValue().toString()); // (4)
+
+        if(str.length() > num){
+            throw new JobParametersInvalidException(
+            "The str must be less than or equal to num. [str:"
+                    + str + "][num:" + num + "]");  // (5)
+        }
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Implement ``JobParametersValidator`` class and override validate method.
+
+|(2)
+|Receive the parameters as arguments in ``JobParameters`` type. +
+By setting ``parameters.getParameters()``, it is easier to refer the parameters by fetching them in Map format.
+
+|(3)
+|Get parameters by specifying key.
+
+|(4)
+|Convert parameters to int type. When handling parameters of other than String type, they should be appropriately converted.
+
+|(5)
+|Validation result is NG when the string length of the parameter ``str`` exceeds the value of parameter ``num``.
+|===
+
+[source, xml]
+.Job definition example
+----
+<batch:job id="jobUseComplexJobParametersValidator" job-repository="jobRepository">
+    <batch:step id="jobUseComplexJobParametersValidator.step01">
+        <batch:tasklet ref="sampleTasklet" transaction-manager="jobTransactionManager"/>
+    </batch:step>
+    <batch:validator>  <!-- (1) -->
+        <bean class="org.terasoluna.batch.functionaltest.ch04.jobparameter.ComplexJobParametersValidator"/>
+    </batch:validator>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Apply validator in the job by using validator tag in the job tag.
+|===
+
+[WARNING]
+.Regarding validation of parameters at asynchronous start
+====
+By the asynchronous start method (DB polling and Web container), it is possible to verify the parameters at the job launch in the same way,
+however, it is desirable to verify them before launching the job at the following timing.
+
+* DB polling
+** Before INSERTing to job request table
+* Web container
+** At the time of calling Controller (assign @Validated)
+
+In case of asynchronous start, since it is necessary to confirm the result separately, errors such as parameter settings
+should be responded quickly and job requests should be rejected.
+
+For validation in this case, there is no need to use ``JobParametersValidator``.
+The function to INSERT to the job request table and the controller in the Web container
+mostly should not depend on {SB} and
+it is better to avoid depending on {SB} since only ``JobParametersValidator`` is used.
+====
+
+[[Ch04_JobParameter_HowToExtends]]
+== How to extend
+
+[[Ch04_JobParameter_HowToExtends_PropertyConbination]]
+=== Using parameters and properties together
+
+Spring Framework based on {SB} is equipped with the property management function to enable it
+to handle the values set in the environment variables and property files.
+For details, refer to
+{server5_url}/ArchitectureInDetail/GeneralFuncDetail/PropertyManagement.html[Property management] of {server5_guide}.
+
+By combining properties and parameters, it is possible to overwrite some parameters after making common settings for most jobs in the property file.
+
+[TIP]
+.About when parameters and propertis are resolved
+====
+As mentioned above, parameters and properties are different components that provide the function. +
+{SB} has a function of parameter management and Spring Framework has a function of property management. +
+This difference appears in the description method.
+
+* In case of function possessed by {SB}
+** ``#{jobParamaters[xxx]}``
+* In case of function possessed by Spring Framework
+** ``@Value("${xxx}")``
+
+The timing of resolving each value is different.
+
+* In case of function possessed by {SB}
+** It is set when the job is executed after generating Application Context.
+* In case of function possessed by Spring Framework
+** It is set at the time of generating Application Context.
+
+Therefore, the parameter value is given priority by {SB}. +
+Note that since the application is effective when they are combined together, both of them should be treated individually
+
+====
+
+How to set by combining properties and parameters, is explained.
+
+.In addition to the setting by environment variables, when additional settings is done by command-line arguments
+
+In addition to the setting by environment variables, how to set the parameters using command-line arguments, is explained. +
+It is possible to refer to it in the same manner as Bean definition.
+
+[source, console]
+.Example of setting parameters by command-line arguments in addition to environment variables
+----
+# Set environment variables
+$ export env1=aaa
+$ export env2=bbb
+
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID param3=ccc outputFile=/tmp/result.csv
+----
+
+[source, java]
+.Example of referring environment variables and parameters in Java
+----
+@Value("${env1}")  // (1)
+private String param1;
+
+@Value("${env2}")  // (1)
+private String param2;
+
+private String param3;
+
+@Value("#{jobParameters['param3']")  // (2)
+public void setParam3(String param3) {
+    this.param3 = param3;
+}
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the environment variables to be referred by using ``@Value`` annotation. +
+The format for reference is ``${Environment variable name}``.
+
+|(2)
+|Specify the parameters to be referred by using ``@Value`` annotation. +
+The format for reference is ``#{jobParameters['Parameter name']``.
+|===
+
+.When default values are set for environment variables and are overwritten by the command-line arguments
+
+[source, console]
+.Example when environment variables are default
+----
+# Set environment variables
+$ export env1=aaa
+
+# Execute job
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    JobDefined.xml JOBID param1=bbb outputFile=/tmp/result.csv
+----
+
+[source, java]
+.Example of referring parameters by setting default values for environment variables in Java
+----
+@Value("#{jobParameters['param1'] ?: '${env1}'}")  // (1)
+public void setParam1(String param1) {
+    this.param1 = param1;
+}
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the parameters to be referred by using ``@Value`` annotation by setting default values in environment variables. +
+When parameters are not set, the value of environment variables are set.
+|===
+
+[WARNING]
+.How to set incorrect default values
+====
+When the following is defined and param1 is not set by command-line arguments,
+note that null is set in param1 irrespective of the fact that you want to set env1 value.
+
+[source, java]
+.Setting method example of incorrect default value
+----
+@Value("${env1}")
+private String param1;
+
+@Value("#{jobParameters['param1']}")
+public void setParam1(String param1) {
+  this.param1 = param1;
+}
+----
+====

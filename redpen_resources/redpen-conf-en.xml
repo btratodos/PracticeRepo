@@ -1,0 +1,56 @@
+<redpen-conf>
+    <validators>
+        <!--Rules on sentence length-->
+        <validator name="SentenceLength">
+            <property name="max_len" value="120" />
+        </validator>
+        <validator name="CommaNumber" >
+            <property name="max_num" value="3" />
+        </validator>
+
+        <!--Rules on expressions-->
+        <validator name="SuccessiveWord" />
+        <validator name="SuggestExpression">
+            <property name="dict" value="terminologies-en.txt" />
+        </validator>
+        <validator name="DoubleNegative" />
+        <validator name="SymbolWithSpace" />
+        <validator name="Contraction" />
+        <validator name="WeakExpression" />
+
+        <!--Rules on symbols and terminologies-->
+        <validator name="InvalidSymbol" />
+        <validator name="ParenthesizedSentence">
+            <property name="max_nesting_level" value="1" />
+            <property name="max_count" value="3" />
+            <property name="max_length" value="10" />
+        </validator>
+        <validator name="NumberFormat" />
+
+        <!--Rules on sections and paragraphs-->
+        <validator name="GappedSection" />
+        <validator name="SectionLevel" />
+
+        <!-- Extended Rules by javascript -->
+        <validator name="JavaScript">
+            <property name="script-path" value="js" />
+        </validator>
+
+    </validators>
+    <symbols>
+        <symbol name="FULL_STOP" value="." invalid-chars="。．" after-space="true" />
+        <symbol name="EXCLAMATION_MARK" value="!" invalid-chars="！" />
+        <symbol name="NUMBER_SIGN" value="#" invalid-chars="＃" />
+        <symbol name="QUESTION_MARK" value="?" invalid-chars="？" />
+        <symbol name="PERCENT_SIGN" value="%" invalid-chars="％" />
+        <symbol name="COMMA" value="," invalid-chars="、，" after-space="true" />
+        <symbol name="SLASH" value="/" invalid-chars="／" />
+        <symbol name="COLON" value=":" invalid-chars="：" />
+        <symbol name="LESS_THAN_SIGN" value="&lt;" invalid-chars="＜" />
+        <symbol name="GREATER_THAN_SIGN" value="&gt;" invalid-chars="＞" />
+        <symbol name="AT_MARK" value="@" invalid-chars="＠" />
+        <symbol name="VERTICAL_BAR" value="|" invalid-chars="｜" />
+        <symbol name="LEFT_PARENTHESIS" value="(" invalid-chars="（" />
+        <symbol name="RIGHT_PARENTHESIS" value=")" invalid-chars="）" />
+    </symbols>
+</redpen-conf>

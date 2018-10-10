@@ -1,0 +1,6 @@
+= Image of TERASOLUNA Batch Stack
+== Images
+
+ditaa::ch02/TerasolunaBatchStack/Ch02_TerasolunaBatchStack_Stack.txt[]
+
+ditaa::ch02/TerasolunaBatchStack/Ch02_TerasolunaBatchStack_Stack_Detail.txt[]

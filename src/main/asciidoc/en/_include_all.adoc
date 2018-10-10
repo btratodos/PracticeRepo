@@ -1,0 +1,26 @@
+// adoc to describe items to be set for each adoc file
+
+// Invalidate caption of Table, Example block
+:example-caption!:
+:table-caption!:
+:figure-caption!:
+
+// Change the link destination to the index page of the footer on the Single and Multi pages
+:index_ref: "index.html"
+ifeval::["{docname}" == "single_index"]
+:index_ref: "#"
+endif::[]
+
+// Define the names used in the whole document
+:SB: Spring Batch
+:SBI: Spring Batch Integration
+
+:server5_fullname: TERASOLUNA Server Framework for Java (5.x)
+:server5_shortname: TERASOLUNA Server 5.x
+:server5_url: http://terasolunaorg.github.io/guideline/5.3.0.RELEASE/en
+:server5_guide: TERASOLUNA Server 5.x Development Guideline
+
+:batch5_fullname: TERASOLUNA Batch Framework for Java (5.x)
+:batch5_shortname: TERASOLUNA Batch 5.x
+:batch5_version: {revnumber-index}
+:batch5_guide: {batch5_shortname} Development guideline

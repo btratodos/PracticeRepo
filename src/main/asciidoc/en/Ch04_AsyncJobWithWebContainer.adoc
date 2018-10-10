@@ -1,0 +1,1119 @@
+include::_include_all.adoc[]
+
+[[Ch04_AsyncJobWithWeb]]
+= Asynchronous execution (Web container)
+
+[[Ch04_AsyncJobWithWeb_Overview]]
+== Overview
+
+A method to execute the job asynchronously in Web container is explained.
+
+The usage method of this function is same in the chunk model as well as tasklet model.
+
+.What is Asynchronous execution of jobs by Web container
+Web application that contains a job is deployed in a Web container
+and the job is executed based on information of sent request. +
+Since one thread is allocated for each job execution and operation is run in parallel,
+it can be executed independent of processes for other jobs and requests.
+
+.Function offered
+{batch5_shortname} does not offer implementation for asynchronous execution (Web container). +
+Only methods of implementation will be provided in this guideline. +
+This is because the start timing of the Web application is various such as HTTP / SOAP / MQ,
+and hence it is determined that the implementation should be appropriately done by the user.
+
+.Usage premise
+* A Web container is required besides the application.
+* Besides implementation of job, required Web application and client are separately implemented according to the operation requirements.
+* Execution status and results of the job is entrusted to ``JobRepository``.
+  Further, a permanently residing database is used instead of in-memory database to enable execution status and results
+  of job to be referred from  ``JobRepository`` even after stopping Web container.
+
+.Usage scene
+It is same as <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB_Overview,"Asynchronous execution (DB polling) - Overview">>.
+
+[TIP]
+.Difference with asynchronous execution (DB polling)
+====
+On the architecture front, immediacy at the time of asynchronous execution and presence or absence of request management table are different. +
+<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">> performs asynchronous execution of multiple jobs registered in the request management table. +
+On the other hand, this function does not require request management table and accepts asynchronous execution on the Web container instead. +
+It is suitable for a short batch which requires immediacy till the start of the operation in order to execute the operation immediately by sending a Web request.
+====
+
+[[Ch04_AsyncJobWithWeb_Arch]]
+== Architecture
+
+Asynchronous jobs by using this method are operated as applications (war) deployed on the Web container, however, the job itself runs asynchronously (another thread) from the request processing of Web container.
+
+
+.Process sequence diagram of asynchronous execution (Web container)
+image::Ch04_AsyncJobWithWebContainer_Sequence.png[sequence of async web]
+
+.Running a job
+. Web client requests Web container to execute the job.
+. ``JobController`` asks ``JobOperator`` of {SB} to start the execution of the job.
+. Execute the job asynchronously by using ``ThreadPoolTaskExecutor``.
+. Return a job execution ID  (``job execution id``) for uniquely identifying an executed target job.
+. ``JobController`` returns a response including job execution ID for the Web client.
+. Execute target job.
+** Job results are reflected in ``JobRepository``.
+. ``Job`` returns execution results. It cannot be notified directly to the client.
+
+.Confirm job execution results
+[start=8]
+. Web client sends job execution ID and ``JobController`` to Web container.
+. ``JobController`` asks ``JobExplorer`` for execution results of job by using a job execution ID.
+. ``JobExplorer`` returns job execution results.
+. ``JobController`` returns a response for Web client.
+** Set Job execution ID in the response.
+
+After receiving a request using Web container, operation is synchronised with the request processing till job execution ID payout, however subsequent job execution is performed asynchronously in a thread pool
+different from that of Web container. +
+As long as the query is not sent again by sending a request, it signifies that execution status of asynchronous job cannot be detected on Web client side.
+
+
+Hence, the request should be sent once at the time of "running a job" on the Web client side during one job execution.
+When "confirmation of results" is necessary, request must be sent once again to the Web container. +
+Abnormality detection which looks different from  first "running a job" will be explained later in
+<<Ch04_AsyncJobWithWeb_Arch_OnError>>.
+
+[TIP]
+====
+Job execution status can be checked by referring direct RDBMS, by using ``JobRepository`` and ``JobExplorer``.
+For details of the function which refer to job execution status and results, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>>.
+====
+
+[WARNING]
+.About handling job execution ID (job execution id)
+====
+Job execution ID generates a different sequence value for each job even though job and job parameters are identical. +
+Job execution ID accepted by sending a request is persisted in external RDBMS by ``JobRepository``. +
+However, when this ID is lost due to failure of Web client, specifying or tracking job execution status becomes difficult. +
+Hence, adequate preparations must be made on Web client side to cope with loss of job execution ID like logging the job execution ID returned as a response.
+====
+
+[[Ch04_AsyncJobWithWeb_Arch_OnError]]
+=== About detection of abnormality occurrence at the time of running a job
+
+After sending a job run request from Web client, abnormality detection appearance varies along with job execution ID payout.
+
+* Abnormality can be detected immediately by the response at the time of running a job
+** Job to be activated does not exist.
+** Invalid job parameter format.
+* After running a job, queries regarding job execution status and results for Web container are necessary
+** Job execution status
+** Job start failure due to depletion of thread pool used in asynchronous job execution
+
+[NOTE]
+====
+"Job running error" can be detected as an exception occurring in Spring MVC controller.
+Since the explanation is omitted here, refer
+{server5_url}/ArchitectureInDetail/WebServiceDetail/REST.html#resthowtouseexceptionhandling[Implementation of exception handling] of {server5_guide} described separately.
+
+Further, input check of the request used as a job parameter is performed in the Spring MVC controller as required. +
+For basic implementation methods, refer
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html[Input check] of {server5_guide}.
+====
+
+[TIP]
+.Job start failure occurring due to depletion of thread pool cannot be captured at the time of running a job.
+====
+Job start failure due to depletion of thread pool is not generated from ``JobOperator``, hence it must be checked separately.
+One of the methods of confirmation include using ``JobExplorer`` while checking execution status of job and checking whether the following conditions are satisfied.
+
+* Status is ``FAILED``
+* Exception stack trace of ``org.springframework.core.task.TaskRejectedException`` is recorded in
+``jobExecution.getExitStatus().getExitDescription()``.
+====
+
+[[Ch04_AsyncJobWithWeb_Arch_Components]]
+=== Application configuration of asynchronous execution (Web container)
+
+The function is same as <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">> and use
+``async`` and ``AutomaticJobRegistrar`` of Spring profile as a configuration specific to asynchronous execution.
+
+On the other hand, prior knowledge and some specific settings are required in order to use these functions asynchronously (Web container).
+Refer <<Ch04_AsyncJobWithWeb_Arch_AppCtx,"ApplicationContext configuration">>. +
+For configuration methods of basic ``async`` profile and ``AutomaticJobRegistrar``,
+<<Ch04_AsyncJobWithWeb_How_to_implements,"How to implement applications using asynchronous execution (Web container)">> will be described later.
+
+[[Ch04_AsyncJobWithWeb_Arch_AppCtx]]
+==== ApplicationContext configuration
+
+As described above, multiple application modules are included as application configuration of asynchronous execution (Web container). +
+It is necessary to understand respective application contexts, types of Bean definitions and their relationships.
+
+.ApplicationContext configuration
+image::Ch04_AsyncJobWithWebContainer_Package.png[Package structure of async web]
+.Bean definition file configuration
+image::Ch04_AsyncJobWithWebContainer_BeanDefinitions.png[BeanDefinitions structure of async web]
+
+``ApplicationContext`` of batch application is incorporated in the context, in ``ApplicationContext`` during asynchronous execution (Web container). +
+Individual job contexts are modularised from  Web context using ``AutomaticJobRegistrar`` and
+it acts as a sub-context of Web context.
+
+Bean definition file which constitute respective contexts are explained.
+
+[cols="10,90", options="header"]
+.List of Bean definition files
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Common Bean definition file. +
+It acts as a parent context in the application and is uniquely shared among jobs acting as sub-contexts.
+
+|(2)
+|Bean definition file which is always imported from job Bean definitions. +
+If Spring profile is ``async`` specified at the time of asynchronous execution, ``launch-context.xml`` of (1) is not read.
+
+|(3)
+|Bean definition file created for each job. +
+It is modularized by ``AutomaticJobRegistrar`` and are used as respective independent sub-contexts in the application.
+
+|(4)
+|It is read from ``DispatcherServlet``. +
+Define the Beans unique to asynchronous execution such as ``AutomaticJobRegistrar`` which performs modularization of job Bean definition and ``taskExecutor`` which is a thread pool used in asynchronous and parallel execution of jobs. +
+Further, in asynchronous execution, ``launch-context.xml`` of (1) is imported directly +
+and uniquely shared as parent contexts.
+
+|(5)
+|It acts as a parent context shared within the Web application by using ``ContextLoaderListener``.
+
+|===
+
+[[CCh04_AsyncJobWithWeb_HowToUse]]
+== How to use
+
+Here, explanation is given using {server5_fullname}, as an implementation example of Web application. +
+Kindly remember that only explanation is offered and {server5_shortname} is not a necessary requirement of asynchronous execution (Web container).
+
+[[Ch04_AsyncJobWithWeb_How_to_implements]]
+=== Overview of implementation of application by asynchronous execution (Web container)
+
+Explanation is given based on following configuration.
+
+* Web application project and batch application project are independent
+  and a batch application is referred from a web application.
+** war file generated from Web application project contains
+  jar file generated from batch application project
+
+Implementation of asynchronous execution is performed in accordance with <<Ch04_AsyncJobWithWeb_Arch>> wherein Spring
+MVC controller in the Web application starts the job by using ``JobOperator``.
+
+[TIP]
+.About isolation of Web/batch application project
+====
+Final deliverable of application build is a war file of Web application, however,
+a development project should be implemented by separating Web/batch applications. +
+Since it is a library which can be operated by a batch application alone, it helps in identifying work boundary
+and library dependency besides making the development project testing easier to implement.
+====
+
+Web/batch development is explained now assuming the use of 2 components below.
+
+* Batch application project by {batch5_shortname}
+* Web application project by {server5_shortname}
+
+For how to create a batch application project and how to implement a basic job, refer
+<<Ch03_CreateProject.adoc#Ch03_CreateProject_HowToCreate,"How to create a project">>,
+<<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob,"Creation of tasklet model job">>,
+<<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob, "Creation of chunk model job">>.
+
+Here, we will focus on starting a batch application from a Web application.
+
+Here, explanation is given by creating a batch application project,
+by using Maven archetype:generate.
+
+[cols="20,80", options="header"]
+.How to create a job project
+|===
+|Name
+|Value
+
+|groupId
+|org.terasoluna.batch.sample
+
+|artifactId
+|asyncbatch
+
+|version
+|1.0-SNAPSHOT
+
+|package
+|org.terasoluna.batch.sample
+
+|===
+
+A job registered from the beginning for a blank project is used for convenience of explanation.
+
+[cols="20,80", options="header"]
+.Job used for explanation
+|===
+|Name
+|Description
+
+|Job name
+|job01
+
+|Job parameter
+|param1=value1
+
+|===
+
+[CAUTION]
+.Precautions for asynchronous execution (Web container) job design
+====
+Individual jobs are completed in a short period of time as a characteristic of asynchronous execution (Web container)
+ and are operated in a stateless manner on the Web container. +
+Further, it is necessary to build a job definition with only a single step to avoid complexity and it is desirable not
+ to define flow branching by using exit codes of step and parallel/multiple processing.
+====
+
+Create a Web application as a state wherein a jar file including a job implementation can be created.
+
+.Implementation of Web application
+How to implement a Web application is explained by using a blank project offered by {server5_shortname}.
+For details, refer {server5_guide}
+{server5_url}/ImplementationAtEachLayer/CreateWebApplicationProject.html[Creating a development project for Web application].
+
+
+Here, similar to asynchronous execution application project, explanation is given below creating with the following names.
+
+[cols="20,80", options="header"]
+.How to create a Web container project
+|===
+|Name
+|Value
+
+|groupId
+|org.terasoluna.batch.sample
+
+|artifactId
+|asyncapp
+
+|version
+|1.0-SNAPSHOT
+
+|package
+|org.terasoluna.batch.sample
+
+|===
+
+[TIP]
+.About naming of groupId
+====
+Although naming a project is optional, when a batch application as a Maven multiproject is considered as a sub-module,
+it is easy to manage if `groupId`` is integrated. +
+Here, ``groupId`` of both is considered as ``org.terasoluna.batch.sample``.
+====
+
+[[Ch04_AsyncJobWithWeb_HowToUse_Config]]
+=== Various settings
+
+.Include batch application as a part of Web application
+
+Edit pom.xml and include batch application as a part of Web application.
+
+[CAUTION]
+====
+Batch application is registered in NEXUS or Maven local repository as ``jar``
+This process is not required while setting a separate project from that of Web application. +
+However, target to be built by Maven is a separate project and it will not be reflected while building the web application even if the batch application is modified. +
+It should be registered in the same repository in order to reflect the modification of batch application in the Web application.
+====
+
+.Directory structure
+image::Ch04_AsyncJobWithWebContainer_DirectoryStructure.png[directory structure]
+
+[source,xml]
+.asyncapp/pom.xml
+----
+<project>
+  <!-- omitted -->
+  <modules>
+    <module>asyncapp-domain</module>
+    <module>asyncapp-env</module>
+    <module>asyncapp-initdb</module>
+    <module>asyncapp-web</module>
+    <module>asyncapp-selenium</module>
+    <module>asyncbatch</module> <!-- (1) -->
+  </modules>
+</project>
+----
+
+[source,xml]
+.asyncapp/asyncbatch/pom.xml
+----
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.terasoluna.batch.sample</groupId> <!-- (2) -->
+  <artifactId>asyncbatch</artifactId>
+  <version>1.0-SNAPSHOT</version> <!-- (2) -->
+  <!-- (1) -->
+  <parent>
+    <groupId>org.terasoluna.batch.sample</groupId>
+    <artifactId>asyncapp</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+  <!-- omitted -->
+</project>
+----
+
+[cols="10,90", options="header"]
+.Deleted / added contents
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Add settings for considering the Web application as a parent and batch application as a child.
+
+|(2)
+|Delete unnecessary description with deletion of child or sub-module.
+
+|===
+
+.Addition of dependent library
+
+Add a batch application as a dependent library of Web application.
+
+[source,xml]
+.asyncapp/async-web/pom.xml
+----
+<project>
+  <!-- omitted -->
+  <dependencies>
+  <!-- (1) -->
+    <dependency>
+        <groupId>${project.groupId}</groupId>
+        <artifactId>asyncbatch</artifactId>
+        <version>${project.version}</version>
+    </dependency>
+    <!-- omitted -->
+  </dependencies>
+  <!-- omitted -->
+</project>
+----
+
+[cols="10,90", options="header"]
+.Details added
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Add a batch application as a dependent library of Web application.
+
+|===
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp]]
+=== Implementation of Web application
+
+Here, a RESTful Web service is created as a Web application using {server5_guide} as a reference below.
+
+Setting for enabling Spring MVC component which is necessary for {server5_url}/ArchitectureInDetail/WebServiceDetail/REST.html[RESTful Web Service]
+
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_Config]]
+==== Web application settings
+
+At first, add, delete and edit various configuration files from the blank project of Web application.
+
+[NOTE]
+====
+For the explanation, an implementation which use RESTful Web Service as an implementation status of batch application is given. +
+Procedure will be same even when conventional Web application (Servlet/JSP) or SOAP is used. Read accordingly.
+====
+
+.Bean definition file to be added/deleted from a blank project
+image::Ch04_AsyncJobWithWebContainer_AppendBeanDefinitionsOnBlank.png[AppendBeanDefinitionsOnBlank]
+
+[source,xml]
+.Description example of asyncapp/asyncapp-web/src/main/resources/META-INF/spring/spring-mvc-rest.xml
+----
+<!-- omitted -->
+<!-- (1) -->
+<import resource="classpath:META-INF/spring/launch-context.xml"/>
+
+<bean id="jsonMessageConverter"
+      class="org.springframework.http.converter.json.MappingJackson2HttpMessageConverter"
+      p:objectMapper-ref="objectMapper"/>
+
+<bean id="objectMapper"
+      class="org.springframework.http.converter.json.Jackson2ObjectMapperFactoryBean">
+  <property name="dateFormat">
+      <bean class="com.fasterxml.jackson.databind.util.StdDateFormat"/>
+  </property>
+</bean>
+
+<mvc:annotation-driven>
+  <mvc:message-converters register-defaults="false">
+    <ref bean="jsonMessageConverter"/>
+  </mvc:message-converters>
+</mvc:annotation-driven>
+
+<mvc:default-servlet-handler/>
+
+<!-- (2) -->
+<context:component-scan base-package="org.terasoluna.batch.sample.app.api"/>
+
+<!-- (3) -->
+<bean class="org.springframework.batch.core.configuration.support.AutomaticJobRegistrar">
+    <property name="applicationContextFactories">
+        <bean class="org.springframework.batch.core.configuration.support.ClasspathXmlApplicationContextsFactoryBean">
+            <property name="resources">
+                <list>
+                  <value>classpath:/META-INF/jobs/**/*.xml</value>
+                </list>
+            </property>
+        </bean>
+    </property>
+    <property name="jobLoader">
+        <bean class="org.springframework.batch.core.configuration.support.DefaultJobLoader"
+              p:jobRegistry-ref="jobRegistry"/>
+    </property>
+</bean>
+
+<!-- (4) -->
+<task:executor id="taskExecutor" pool-size="3" queue-capacity="10"/>
+
+<!-- (5) -->
+<bean id="jobLauncher" class="org.springframework.batch.core.launch.support.SimpleJobLauncher"
+      p:jobRepository-ref="jobRepository"
+      p:taskExecutor-ref="taskExecutor"/>
+<!-- omitted -->
+----
+
+[source,xml]
+.Description example of asyncapp/asyncapp-web/src/main/webapp/WEB-INF/web.xml
+----
+<!-- omitted -->
+<servlet>
+    <servlet-name>restApiServlet</servlet-name>
+    <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+    <init-param>
+        <param-name>contextConfigLocation</param-name>
+        <!-- (6) -->
+        <param-value>classpath*:META-INF/spring/spring-mvc-rest.xml</param-value>
+    </init-param>
+    <!-- (7) -->
+    <init-param>
+        <param-name>spring.profiles.active</param-name>
+        <param-value>async</param-value>
+    </init-param>
+    <load-on-startup>1</load-on-startup>
+</servlet>
+
+<servlet-mapping>
+    <servlet-name>restApiServlet</servlet-name>
+    <url-pattern>/api/v1/*</url-pattern>
+</servlet-mapping>
+<!-- omitted -->
+----
+
+[cols="10,90", options="header"]
+.RESTful Web Service validation example
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Import ``launch-context.xml`` which is in the batch application and incorporate required Bean definition.
+
+|(2)
+|Describe package for dynamically scanning the controller.
+
+|(3)
+|Describe a Bean definition of ``AutomaticJobRegistrar`` which dynamically loads as a child or sub context by modularizing each Bean definition file.
+
+|(4)
+|Define ``TaskExecutor`` which executes the job asynchronously. +
+Asynchronous execution can be performed by setting ``AsyncTaskExecutor`` implementation class in ``TaskExecutor`` of JobLauncher.
+Use ``ThreadPoolTaskExecutor`` which is one of the components of ``AsyncTaskExecutor`` implementation class.
+
+Further, multiplicity of threads which can be operated in parallel can be specified. +
+In this example, 3 threads are assigned to the job execution and requests exceeding this number are queued upto 10.
+Queued job is in "not started" state, however REST request is considered to be successful.+
+In addition, job requests that exceed the queuing limit generate ``org.springframework.core.task.TaskRejectedException`
+and job run request is rejected.
+
+|(5)
+|Override ``jobLauncher`` defined in ``launch-context.xml`` to enable ``taskExecutor`` of (4).
+
+|(6)
+|Specify ``spring-mvc-rest.xml`` described above as a Bean definition +
+read by ``DispatcherServlet``.
+
+|(7)
+|Specify ``async`` which shows an asynchronous batch, as a profile of Spring Framework.
+
+|===
+
+
+[WARNING]
+.When async profile is not specified
+====
+In this case, a Bean defined in ``launch-context.xml`` which should be shared across Web applications is duplicated for each job. +
+Even in case of duplication, since the operation takes place at the functional level, it is difficult to notice an error and it may result in unexpected resource exhaustion and performance degradation.
+Must be specified.
+====
+
+[CAUTION]
+.Thread pool sizing
+====
+When the upper limit of thread pool is in excess, an enormous amount of jobs run in parallel resulting
+in deterioration of entire thread pool.
+Sizing should be done and appropriate upper value must be determined. +
+Besides thread pool of asynchronous execution, request thread of Web container and
+other applications working in the same enclosure must also be considered.
+
+Further, a separate request must be sent from Web client for checking occurrence of ``TaskRejectException`` due to
+thread pool exhaustion and its re-execution.
+Hence, ``queue-capacity`` which waits for job to start must be set at the time of thread pool exhaustion.
+====
+
+.Implementation of RESTful Web Service API
+
+Here, "Running a job" and "Job status check" are defined as 2 examples of requests used in REST API.
+
+
+[cols="5,15,25,10,15,10,20", options="header"]
+.REST API Definition example
+|===
+
+|Sr.No.
+|API
+|Path
+|HTTP method
+|Request/Response
+|Message format
+|Message details
+
+
+.2+|(1)
+.2+|Running a job
+.2+|/api/v1/job/_Job name_
+.2+|POST
+|Request
+|JSON
+|Job parameter
+
+|Response
+|JSON
+|
+Job execution ID +
+Job name +
+Message
+
+.2+|(2)
+.2+|Job execution status check
+.2+|/api/v1/job/_Job execution ID_
+.2+|GET
+|Request
+|N/A
+|N/A
+
+|Response
+|JSON
+|
+Job execution ID +
+Job name +
+Job execution status +
+Job exit code +
+Step execution ID +
+Step name +
+Step exit code
+
+|===
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_JavaBeans]]
+==== Implementation of JavaBeans used in Controller
+
+Create following 3 classes that are returned to REST client as JSON message.
+
+* Job run operation ```JobOperationResource```
+* Job execution status ```JobExecutionResource```
+* Step execution status ``StepExecutionResource``
+
+These classes are implementations for reference except for job execution ID  (``job execution id``) of ``JobOperationResource`` and implementation of field is optional.
+
+[source,java]
+.Implementation example of job run operation information
+----
+// asyncapp/asyncapp-web/src/main/java/org/terasoluna/batch/sample/app/api/jobinfo/JobOperationResource.java
+package org.terasoluna.batch.sample.app.api.jobinfo;
+
+public class JobOperationResource {
+
+    private String jobName = null;
+
+    private String jobParams = null;
+
+    private Long jobExecutionId = null;
+
+    private String errorMessage = null;
+
+    private Exception error = null;
+
+    // Getter and setter are omitted.
+}
+----
+
+
+[source,java]
+.Implementation example of job execution information
+----
+// asyncapp/asyncapp-web/src/main/java/org/terasoluna/batch/sample/app/api/jobinfo/JobExecutionResource.java
+package org.terasoluna.batch.sample.app.api.jobinfo;
+
+// omitted.
+
+public class JobExecutionResource {
+
+    private Long jobExecutionId = null;
+
+    private String jobName = null;
+
+    private Long stepExecutionId = null;
+
+    private String stepName = null;
+
+    private List<StepExecutionResource> stepExecutions = new ArrayList<>();
+
+    private String status = null;
+
+    private String exitStatus = null;
+
+    private String errorMessage;
+
+    private List<String> failureExceptions = new ArrayList<>();
+
+    // Getter and setter are omitted.
+}
+----
+
+[source,java]
+.Implementation example of step execution information
+----
+// asyncapp/asyncapp-web/src/main/java/org/terasoluna/batch/sample/app/api/jobinfo/StepExecutionResource.java
+package org.terasoluna.batch.sample.app.api.jobinfo;
+
+public class StepExecutionResource {
+
+  private Long stepExecutionId = null;
+
+  private String stepName = null;
+
+  private String status = null;
+
+  private List<String> failureExceptions = new ArrayList<>();
+
+    // Getter and setter are omitted.
+}
+----
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_Controller]]
+==== Implementation of controller
+
+A controller of RESTful Web Service is implemented by using ``@RestController``. +
+in order to simplify, ``JobOperator`` is injected in the controller and running a job and execution status are fetched.
+Of course, ``JobOperator`` can also be started by using Service from the controller in accordance with {server5_shortname}.
+
+[TIP]
+.About job parameters that are passed at the time of running a job
+====
+The job parameter passed in the second argument of ``JobOperator#start()`` at running a job is ``String``.
+When there are multiple job parameters, they should be separated by using a comma unlike ``CommandLineJobRunner`` of synchronous execution.
+Basically the format is as below. +
+``{Job parameter 1}={Value 1},{Job parameter 2}={Value 2},...``
+
+This is same as the method of specifying job parameters in <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">>.
+====
+
+[source,java]
+.Example of implementing a controller
+----
+// asyncapp/asyncapp-web/src/main/java/org/terasoluna/batch/sample/app/api/JobController.java
+package org.terasoluna.batch.sample.app.api;
+
+// omitted.
+
+// (1)
+@RequestMapping("job")
+@RestController
+public class JobController {
+
+    // (2)
+    @Inject
+    JobOperator jobOperator;
+
+    // (2)
+    @Inject
+    JobExplorer jobExplorer;
+
+    @RequestMapping(value = "{jobName}", method = RequestMethod.POST)
+    public ResponseEntity<JobOperationResource> launch(@PathVariable("jobName") String jobName,
+            @RequestBody JobOperationResource requestResource) {
+
+        JobOperationResource responseResource = new JobOperationResource();
+        responseResource.setJobName(jobName);
+        try {
+            // (3)
+            Long jobExecutionId = jobOperator.start(jobName, requestResource.getJobParams());
+            responseResource.setJobExecutionId(jobExecutionId);
+            return ResponseEntity.ok().body(responseResource);
+        } catch (NoSuchJobException | JobInstanceAlreadyExistsException | JobParametersInvalidException e) {
+            responseResource.setError(e);
+            return ResponseEntity.badRequest().body(responseResource);
+        }
+    }
+
+    @RequestMapping(value = "{jobExecutionId}", method = RequestMethod.GET)
+    @ResponseStatus(HttpStatus.OK)
+    public JobExecutionResource getJob(@PathVariable("jobExecutionId") Long jobExecutionId) {
+
+        JobExecutionResource responseResource = new JobExecutionResource();
+        responseResource.setJobExecutionId(jobExecutionId);
+
+        // (4)
+        JobExecution jobExecution = jobExplorer.getJobExecution(jobExecutionId);
+
+        if (jobExecution == null) {
+            responseResource.setErrorMessage("Job execution not found.");
+        } else {
+            mappingExecutionInfo(jobExecution, responseResource);
+        }
+
+        return responseResource;
+    }
+
+    private void mappingExecutionInfo(JobExecution src, JobExecutionResource dest) {
+      dest.setJobName(src.getJobInstance().getJobName());
+      for (StepExecution se : src.getStepExecutions()) {
+          StepExecutionResource ser = new StepExecutionResource();
+          ser.setStepExecutionId(se.getId());
+          ser.setStepName(se.getStepName());
+          ser.setStatus(se.getStatus().toString());
+          for (Throwable th : se.getFailureExceptions()) {
+              ser.getFailureExceptions().add(th.toString());
+          }
+          dest.getStepExecutions().add(ser);
+      }
+      dest.setStatus(src.getStatus().toString());
+      dest.setExitStatus(src.getExitStatus().toString());
+    }
+}
+----
+
+
+[cols="10,90", options="header"]
+.Implementation of controller
+|====
+
+|Sr. No.
+|Description
+
+|(1)
+| Specify ``@RestController``.
+Further, when servlet mapping of ``web.xml`` is done by using ``@RequestMapping("job")``,
+base path of REST API is ``_contextName_/api/v1/job/``.
+
+|(2)
+|Describe field injections of ``JobOperator`` and ``JobExplorer``.
+
+|(3)
+| Use ``JobOperator`` and start a new asynchronous job. +
+Receive job execution ID as a return value and return to REST client.
+
+|(4)
+|Use ``JobExplorer`` and fetch job execution status (``JobExecution``) based on job execution ID. +
+Return it to REST client after converting it to a pre-designed message.
+
+|====
+
+[[Ch04_AsyncJobWithWeb_HowToUse_integration_configs]]
+==== Integration of Web/batch application module setting
+
+Batch application module (``asyncbatch``) operates as a stand-alone application.
+Hence, batch application module (``asyncbatch``) consists of settings which are in conflict and overlapping with settings of Web application module (``asyncapp-web``).
+These settings must be integrated as required.
+
+. Integration of log configuration file ``logback.xml`` +
+When multiple Logback definition files are defined in Web/batch, they do not work appropriately. +
+The contents of ``asyncbatch/src/main/resources/logback.xml`` are integrated into same file of ``asyncapp-env/src/main/resources/`` and then the file is deleted.
+. Data source and MyBatis configuration file are not integrated +
+Definitions of data source and MyBatis configuration file are not integrated between Web/batch since the definition of application context is independent due to following relation.
+
+** ``asyncbatch`` module of the batch is defined in the servlet as a closed context.
+** ``asyncapp-domain`` and ``asyncapp-env`` modules of Web are defined as contexts used by entire application.
+
+[CAUTION]
+.Cross-reference of data source and MyBatis settings by Web and batch modules
+====
+Since the scope of context for Web and batch modules is different,
+data source, MyBatis settings and Mapper interface cannot be referred especially from Web module. +
+Since initialization of RDBMS schema is also carried out independently based on the different settings of respective
+modules, adequate care must be taken not to perform unintended initialization due to mutual interference.
+====
+
+[IMPORTANT]
+.CSRF countermeasures specific to REST controller
+====
+When a request is sent for REST controller in the initialization settings of Web blank project, it results in a CSRF
+error and execution of job is rejected.
+Hence, explanation is given here assuming that CSRF countermeasures are disabled by the following method.
+
+{server5_url}/ArchitectureInDetail/WebServiceDetail/REST.html#csrf[CSRF countermeasures]
+
+Web application created here is not published on the internet and CSRF countermeasures are disabled on the premise that
+REST request is not sent from a third party who can exploit CSRF as a means of attack.
+Please note that necessity may differ in the actual Web application depending on the operating environment.
+====
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_Build]]
+==== Build
+
+Build Maven command and create a war file.
+
+[source,console]
+----
+$ cd asyncapp
+$ ls
+asyncbatch/  asyncapp-web/  pom.xml
+$ mvn clean package
+[INFO] Scanning for projects...
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO]
+[INFO] TERASOLUNA Server Framework for Java (5.x) Web Blank Multi Project (MyBatis3)
+[INFO] TERASOLUNA Batch Framework for Java (5.x) Blank Project
+[INFO] asyncapp-web
+[INFO]
+[INFO] ------------------------------------------------------------------------
+[INFO] Building TERASOLUNA Server Framework for Java (5.x) Web Blank Multi Project (MyBatis3) 1.0-SNAPSHOT
+[INFO] ------------------------------------------------------------------------
+
+(omitted)
+
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary:
+[INFO]
+[INFO] TERASOLUNA Server Framework for Java (5.x) Web Blank Multi Project (MyBatis3) SUCCESS [  0.226 s]
+[INFO] TERASOLUNA Batch Framework for Java (5.x) Blank Project SUCCESS [  6.481s]
+[INFO] asyncapp-web ....................................... SUCCESS [  5.400 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time: 12.597 s
+[INFO] Finished at: 2017-02-10T22:32:43+09:00
+[INFO] Final Memory: 38M/250M
+[INFO] ------------------------------------------------------------------------
+$
+----
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_Deploy]]
+==== Deploy
+
+Start a Web container like Tomcat and deploy ``war`` file generated in the build.
+Detailed process is omitted.
+
+[[Ch04_AsyncJobWithWeb_HowToUse_WebApp_Run]]
+=== Job start and confirmation of execution results using REST Client
+
+Here, curl command is used as a REST client and an asynchronous job is started.
+
+[source,console]
+----
+$ curl -v \
+  -H "Accept: application/json" -H "Content-type: application/json" \
+  -d '{"jobParams": "param1=value1"}' \
+  http://localhost:8080/asyncapp-web/api/v1/job/job01
+* timeout on name lookup is not supported
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to localhost (127.0.0.1) port 8088 (#0)
+> POST /asyncapp-web/api/v1/job/job01 HTTP/1.1
+> Host: localhost:8088
+> User-Agent: curl/7.51.0
+> Accept: application/json
+> Content-type: application/json
+> Content-Length: 30
+>
+* upload completely sent off: 30 out of 30 bytes
+< HTTP/1.1 200
+< X-Track: 0267db93977b4552880a4704cf3e4565
+< Content-Type: application/json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Fri, 10 Feb 2017 13:55:46 GMT
+<
+{"jobName":"job01","jobParams":null,"jobExecutionId":3,"error":null,"errorMessag
+e":null}* Curl_http_done: called premature == 0
+* Connection #0 to host localhost left intact
+$
+----
+
+From the above, it can be confirmed that job is executed with a job execution ID ``jobExecutionId = 3``. +
+Subsequently, job execution results are fetched by using job execution ID.
+
+[source,console]
+----
+$ curl -v http://localhost:8080/asyncapp-web/api/v1/job/3
+* timeout on name lookup is not supported
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to localhost (127.0.0.1) port 8088 (#0)
+> GET /asyncapp-web/api/v1/job/3 HTTP/1.1
+> Host: localhost:8088
+> User-Agent: curl/7.51.0
+> Accept: */*
+>
+< HTTP/1.1 200
+< X-Track: 7d94bf4d383745efb20cbf37cb6a8e13
+< Content-Type: application/json;charset=UTF-8
+< Transfer-Encoding: chunked
+< Date: Fri, 10 Feb 2017 14:07:44 GMT
+<
+{"jobExecutionId":3,"jobName":"job01","stepExecutions":[{"stepExecutionId":5,"st
+epName":"job01.step01","status":"COMPLETED","failureExceptions":[]}],"status":"C
+OMPLETED","exitStatus":"exitCode=COMPLETED;exitDescription=","errorMessage":null
+}* Curl_http_done: called premature == 0
+* Connection #0 to host localhost left intact
+$
+----
+
+Since ``exitCode=COMPLETED``, it can be confirmed that the job is completed successfully.
+
+[TIP]
+.When execution results of curl are to be determined by a shell script etc
+====
+In the example above, it is displayed upto the response message using REST API.
+When only HTTP status is to be confirmed by curl command, HTTP status can be displayed in standard output by considering ``curl -s URL -o /dev/null -w "%{http_code}\n"``. +
+However, since job execution ID need to analyse JSON of response body part, REST
+client application must be created as required.
+====
+
+[[Ch04_AsyncJobWithWeb_HowToExtend]]
+== How to extend
+
+[[Ch04_AsyncJobWithWeb_HowToExtend_Stop_And_Restart]]
+=== Stopping and restarting jobs
+
+It is necessary to stop and restart asynchronous jobs from the multiple jobs that are being executed.
+Further, when jobs of identical names are running in parallel, it is necessary to target only those jobs with the issues.
+Hence, job execution to be targeted must be identified and the status of the job must be confirmed. +
+When this premise is met, an implementation for stopping and restarting asynchronous executions is explained here.
+
+Further, a method to add job stopping (stop) and restarting (restart) is explained
+for ``JobController`` of <<Ch04_AsyncJobWithWeb_HowToUse_WebApp_Controller>>.
+
+NOTE: Job stopping and restarting can also be implemented without using ``JobOperator``. +
+For details, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>> and identify a method suitable for this objective.
+
+[source,java]
+.Implementation example of stop and restart
+----
+// asyncapp/asyncapp-web/src/main/java/org/terasoluna/batch/sample/app/api/JobController.java
+package org.terasoluna.batch.sample.app.api;
+
+// omitted.
+
+@RequestMapping("job")
+@RestController
+public class JobController {
+
+    // omitted.
+
+    @RequestMapping(value = "stop/{jobExecutionId}", method = RequestMethod.PUT)
+    @Deprecated
+    public ResponseEntity<JobOperationResource> stop(
+            @PathVariable("jobExecutionId") Long jobExecutionId) {
+
+      JobOperationResource responseResource = new JobOperationResource();
+      responseResource.setJobExecutionId(jobExecutionId);
+      boolean result = false;
+      try {
+          // (1)
+          result = jobOperator.stop(jobExecutionId);
+          if (!result) {
+              responseResource.setErrorMessage("stop failed.");
+              return ResponseEntity.badRequest().body(responseResource);
+          }
+          return ResponseEntity.ok().body(responseResource);
+      } catch (NoSuchJobExecutionException | JobExecutionNotRunningException e) {
+          responseResource.setError(e);
+          return ResponseEntity.badRequest().body(responseResource);
+      }
+    }
+
+    @RequestMapping(value = "restart/{jobExecutionId}",
+                    method = RequestMethod.PUT)
+    @Deprecated
+    public ResponseEntity<JobOperationResource> restart(
+            @PathVariable("jobExecutionId") Long jobExecutionId) {
+
+        JobOperationResource responseResource = new JobOperationResource();
+        responseResource.setJobExecutionId(jobExecutionId);
+        try {
+            // (2)
+            Long id = jobOperator.restart(jobExecutionId);
+            responseResource.setJobExecutionId(id);
+            return ResponseEntity.ok().body(responseResource);
+        } catch (JobInstanceAlreadyCompleteException |
+                  NoSuchJobExecutionException | NoSuchJobException |
+                  JobRestartException | JobParametersInvalidException e) {
+            responseResource.setErrorMessage(e.getMessage());
+            return ResponseEntity.badRequest().body(responseResource);
+        }
+    }
+
+    // omitted.
+}
+----
+
+[cols="10,90", options="header"]
+.Implementation example of stop / restart using controller
+|====
+
+|Sr. No.
+|Description
+
+|(1)
+| Specify "stop" for job being executed by calling ``JobOperator#stop()``.
+
+|(2)
+|Re-execute from the step where the job has terminated abnormally or stopped by calling ``JobOperator#restart()``.
+
+|====
+
+
+[[Ch04_AsyncJobWithWeb_Multiple_Launch]]
+=== Multiple running
+
+Multiple running signify that a Web container is started for multiple times and waits for respective job requests.
+
+Execution of asynchronous jobs is controlled by external RDBMS so as to connect to each application.
+By sharing an external RDBMS, it is possible to wait for an asynchronous job to be started across the same enclosure or another enclosure.
+
+Applications include load balancing and redundancy for specific jobs.
+However, as described in <<Ch04_AsyncJobWithWeb_HowToUse_WebApp>>,
+these effects cannot be obtained easily just by starting multiple Web containers or enhancing parallel operations.
+Sometimes measures similar to a general Web application need to be taken in order to obtain the effect.
+An example is given below.
+
+* 1 request processing operates in a stateless manner according to the characteristics of Web application, however,
+  asynchronous execution of batch is likely to have a reduced failure tolerance unless it is designed in combination with job start results and confirmation. +
+  For example, even when Web container for starting a job is made redundant, it is difficult to confirm the progress
+  and results of the job when the job execution ID  is lost after starting a job due to failure on the client side.
+* A function to distribute request destinations on the client side must be implemented and a load balancer must be
+  introduced in order to distribute the load on multiple Web containers.
+
+In this way, adequacy of multiple starts cannot be necessarily determined.
+Hence, using load balancer and reviewing a control method to send requests by Web client should be considered based on the purpose and use.
+A design which does not degrade the performance and fault tolerance of the asynchronous execution application is required.

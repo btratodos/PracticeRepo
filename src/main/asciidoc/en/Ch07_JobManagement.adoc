@@ -1,0 +1,706 @@
+include::_include_all.adoc[]
+
+[[Ch07_JobManagement]]
+= Job Management
+
+[[Ch07_JobManagement_Overview]]
+== Overview
+Explain how to manage job execution.
+
+This function is the same usage for chunk model and tasklet model.
+
+=== What is Job Execution Management?
+It means to record the activation state and execution result of the job and maintain the batch system.
+In particular, it is important to secure necessary information in order to detect when an abnormality has occurred and determine what action should be taken next (such as rerun / restart after abnormal termination).
+Due to the characteristics of the batch application, it is rare that the result can be confirmed on the user interface immediately after startup.
+Therefore, it is necessary to have a mechanism to record execution status and results separately from job execution, such as job scheduler / RDBMS / application log.
+
+==== Functions Offered by {SB}
+
+{SB} provides the following interface for job execution management.
+
+[cols="40,60", options="header"]
+.List of job management functions
+|===
+|Function
+|Corresponding interface
+
+|Record job execution status/result
+|``org.springframework.batch.core.repository.JobRepository``
+
+|Convert job exit code and process exit code
+|``org.springframework.batch.core.launch.support.ExitCodeMapper``
+
+|===
+
+{SB} uses ``JobRepository`` for recording the job's activation status and execution result.
+For {batch5_shortname}, if all of the following are true, persistence is optional:
+
+* Using {batch5_shortname} only for synchronous job execution.
+* Managing all job execution with the job scheduler including job stop/restart.
+** Especially not using restart assuming ``JobRepository`` of {SB}.
+
+When these are applicable, use ``H2`` which is an in-memory/built-in database as an option of RDBMS used by ``JobRepository``. +
+On the other hand, when using asynchronous execution or when using stop/restart of {SB}, an RDBMS that can persist the job execution status/result is required.
+
+[IMPORTANT]
+.Default transaction isolation level
+====
+In xsd provided by {SB}, the transaction isolation level of ``JobRepository`` has ``SERIALIZABLE`` as the default value.
+However, in this case, when multiple jobs are executed concurrently regardless of whether it is synchronous or asynchronous, an exception occurs in updating ``JobRepository``.
+Therefore, {batch5_shortname} sets the transaction isolation level of ``JobRepository`` to ``READ_COMMITTED`` in advance.
+====
+
+[NOTE]
+.In-memory JobRepository Options
+====
+{SB} has ``org.springframework.batch.core.repository.support.MapJobRepositoryFactoryBean``
+which performs job execution management in-memory,
+but it is not used in this guideline. +
+As shown in the Javadoc of this class,
+It is explained that it is for testing as
+``This repository is only really intended for use in testing and rapid prototyping.``
+and  that it is inappropriate for parallel processing as
+``Not suited for use in multi-threaded jobs with splits``
+====
+
+For the job execution management using job scheduler, refer to the manual of each product. +
+In this guideline,
+explain the following items related to managing the job status using ``JobRepository`` within {batch5_shortname}.
+
+.Items related to state management within TERASOLUNA Batch
+
+* <<Ch07_JobManagement_JobStatusManagement>>
+** How to persist state
+** How to check the status
+** How to stop the job manually
+* <<Ch07_JobManagement_ExitCode>>
+* <<Ch07_JobManagement_DuplicateSafe>>
+* <<Ch07_JobManagement_Logging>>
+* <<Ch07_JobManagement_MessageManagement>>
+
+[[Ch07_JobManagement_HowToUse]]
+== How to use
+
+``JobRepository`` automatically registers/updates the job status/execution result in RDBMS through {SB}.
+When confirming them, select one of the following methods so that unintended change processing is not performed from inside or outside the batch application.
+
+* Query the table relating to <<Ch07_JobManagement_JobStatusManagement,Job Status Management>>
+* Use ``org.springframework.batch.core.explore.JobExplorer``
+
+[[Ch07_JobManagement_JobStatusManagement]]
+=== Job Status Management
+
+Explain job status management method using ``JobRepository``. +
+By {SB}, the following Entities are registered in the RDBMS table.
+
+[cols="10,20,20,20,30", options="header"]
+.Entity class and table name managed by JobRepository
+|===
+|Sr. No.
+|Entity class
+|Table name
+|Generation unit
+|Desctiption
+
+|(1)
+|``JobExecution``
+|``BATCH_JOB_EXECUTION``
+|Execution of one job
+|Maintain job status/execution result.
+
+|(2)
+|``JobExecutionContext``
+|``BATCH_JOB_EXECUTION_CONTEXT``
+|Execution of one job
+|Maintain the context inside the job.
+
+|(3)
+|``JobExecutionParams``
+|``BATCH_JOB_EXECUTION_PARAMS``
+|Execution of one job
+|Hold job parameters given at startup.
+
+|(4)
+|``StepExecution``
+|``BATCH_STEP_EXECUTION``
+|Execution of one step
+|Maintain the state/execution result of the step, commit/rollback number.
+
+|(5)
+|``StepExecutionContext``
+|``BATCH_STEP_EXECUTION_CONTEXT``
+|Execution of one step
+|Maintain the context inside the step.
+
+|(6)
+|``JobInstance``
+|``BATCH_JOB_INSTANCE``
+|Combination of job name and job parameter
+|Hold job name and string serialized job parameter.
+
+|===
+
+For example, when three steps are executed with one job execution, the following difference occurs.
+
+* ``JobExecution``, ``JobExecutionContext`` and ``JobExecutionParams`` register 1 record.
+* ``StepExecution`` and ``StepExecutionContext`` register 3 record.
+
+Also, ``JobInstance`` is used to suppress double execution by the same name job and same parameter started in the past,
+{batch5_shortname} does not check this. For details, refer to  <<Ch07_JobManagement_DuplicateSafe,Double Activation Prevention>>.
+
+[TIP]
+====
+The structure of each table by ``JobRepository`` is described
+in <<Ch02_SpringBatchArchitecture.adoc#, Architecture of {SB}>>.
+====
+
+[IMPORTANT]
+.About the item count of StepExecution in the chunk method
+====
+As shown below, it seems that inconsistency is occurring, but there are cases where it is reasonable from the specification.
+
+* The transaction issue count of ``StepExecution(BATCH_STEP_EXECUTION table)`` sometimes does not match the number of input data counts.
+** The number of transaction issues refers to the sum of ``COMMIT_COUNT`` and ``ROLLBACK_COUNT`` of ``BATCH_STEP_EXECUTION``. +
+   However, ``COMMIT_COUNT`` becomes +1 if the number of input data is divisible by the chunk size. +
+   This is because null representing the end is also counted as input data and is processed empty, after reading the number of input data counts.
+
+* The number of processing of ``BATCH_STEP_EXECUTION`` and ``BATCH_STEP_EXECUTION_CONTEXT`` may be different.
+** In ``READ_COUNT`` and ``WRITE_COUNT`` of ``BATCH_STEP_EXECUTION``, the number of items read and written by ``ItemReader`` and ``ItemWriter`` are recorded.
+** The ``SHORT_CONTEXT`` column in the ``BATCH_STEP_EXECUTION_CONTEXT`` table records the number of read operations by ``ItemReader`` in JSON format.
+However, it does not necessarily match the number of processing by ``BATCH_STEP_EXECUTION``. +
+** This means that the ``BATCH_STEP_EXECUTION`` table based on the chunk method records the number of reads and writes irrespective of success or failure,
+whereas the ``BATCH_STEP_EXECUTION_CONTEXT`` table records the position to be resumed by a restart in case of a failure in the course of processing.
+====
+
+[[Ch07_JobManagement_JobStatusManagement_Persistence]]
+==== Status Persistence
+By using external RDBMS, job execution management information by ``JobRepository`` can be made persistent.
+To enable this, change the following items in batch-application.properties to be data sources, schema settings for external RDBMS.
+
+[source,properties]
+.batch-application.properties
+----
+# (1)
+# Admin DataSource settings.
+admin.jdbc.driver=org.postgresql.Driver
+admin.jdbc.url=jdbc:postgresql://serverhost:5432/admin
+admin.jdbc.username=postgres
+admin.jdbc.password=postgres
+
+# (2)
+spring-batch.schema.script=classpath:org/springframework/batch/core/schema-postgresql.sql
+----
+
+[cols="20,80", options="header"]
+.List of setting contents (PostgreSQL)
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Describe the setting of the external RDBMS to be connected as the value of the property to which the prefix ``admin`` is attached.
+
+|(2)
+|Specify a script file to automatically generate the schema as ``JobRepository`` at application startup.
+
+|===
+
+
+[IMPORTANT]
+.Supplementary to administrative/business data sources
+====
+* Connection settings to DB are separately defined as management and business data sources. +
+{batch5_shortname} separately defined,
+``JobRepository`` has been set up to use an administrative data source prefixed with ``admin`` as its property prefix.
+
+* When using asynchronous execution (DB polling), specify the same management data source and schema generation script in the job request table. +
+For details, refer to <<Ch04_AsyncJobWithDB,Asynchronous Execution (DB polling)>>.
+====
+
+
+[[Ch07_JobManagement_JobStatusManagement_Retrieve]]
+==== Confirmation of job status/execution result
+Explain how to check the job execution status from ``JobRepository`` +
+In either method, the job execution ID to be checked is known in advance.
+
+===== Query directly
+Using the RDBMS console, query directly on the table persisted by ``JobRepository``.
+
+[source,sql]
+.SQL sample
+----
+admin=# select JOB_EXECUTION_ID, START_TIME, END_TIME, STATUS, EXIT_CODE from BATCH_JOB_EXECUTION where JOB_EXECUTION_ID = 1;
+ job_execution_id |       start_time        |        end_time         |  status   | exit_code
+------------------+-------------------------+-------------------------+-----------+-----------
+                1 | 2017-02-14 17:57:38.486 | 2017-02-14 18:19:45.421 | COMPLETED | COMPLETED
+(1 row)
+admin=# select JOB_EXECUTION_ID, STEP_EXECUTION_ID, START_TIME, END_TIME, STATUS, EXIT_CODE from BATCH_STEP_EXECUTION where JOB_EXECUTION_ID = 1;
+ job_execution_id | step_execution_id |       start_time        |        end_time        |  status   | exit_code
+------------------+-------------------+-------------------------+------------------------+-----------+-----------
+                1 |                 1 | 2017-02-14 17:57:38.524 | 2017-02-14 18:19:45.41 | COMPLETED | COMPLETED
+(1 row)
+----
+
+===== Use ``JobExplorer``
+Under sharing the application context of the batch application, ``JobExplorer`` enables to confirm job execution status by injecting it.
+
+[source,java]
+.API code sample
+----
+// omitted.
+
+@Inject
+private JobExplorer jobExplorer;
+
+private void monitor(long jobExecutionId) {
+
+   // (1)
+   JobExecution jobExecution = jobExplorer.getJobExecution(jobExecutionId);
+
+   // (2)
+   String jobName = jobExecution.getJobInstance().getJobName();
+   Date jobStartTime = jobExecution.getStartTime();
+   Date jobEndTime = jobExecution.getEndTime();
+   BatchStatus jobBatchStatus = jobExecution.getStatus();
+   String jobExitCode = jobExecution.getExitStatus().getExitCode();
+
+   // omitted.
+
+   // (3)
+   for (StepExecution stepExecution : jobExecution.getStepExecutions())
+       String stepName = stepExecution.getStepName();
+       Date stepStartTime = stepExecution.getStartTime();
+       Date stepEndTime = stepExecution.getEndTime();
+       BatchStatus stepStatus = stepExecution.getStatus();
+       String stepExitCode = stepExecution.getExitStatus().getExitCode();
+
+       // omitted.
+   }
+}
+----
+
+[cols="20,80", options="header"]
+.List of setting contents (PostgreSQL)
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Specify the job execution ID from the injected ``JobExplorer`` and get ``JobExecution``.
+
+|(2)
+|Get the job execution result by ``JobExecution``.
+
+|(3)
+|Get a collection of steps executed within the job from ``JobExecution`` and get individual execution result.
+
+|===
+
+[[Ch07_JobManagement_JobStatusManagement_JobStop]]
+==== Stopping a Job
+
+"Stopping a job" is a function that updates the running status of ``JobRepository`` to a stopping status
+and stops jobs at the boundary of steps or at chunk commit by chunk method. +
+Combined with restart, processing from the stopped position can be restarted.
+
+[TIP]
+====
+For details of the restart, refer to <<Ch06_ReProcessing.adoc#Ch06_RerunRestart_HowToUse_Restart,"Job Restart">>.
+====
+
+[CAUTION]
+====
+"Stopping a job" is not a function to immediately stop a job in progress but to update the running status of ``JobRepository`` to the stopping status. +
+It does not perform any kind of stop processing such as interrupting the in-process thread immediately for the job.
+
+Therefore, it can be said that stopping the job is "to reserve to stop when a processing that becomes a milestone is completed, such as a chunk break".
+For example, even if you stop the job under the following circumstances, it will not be the expected behavior.
+
+* Job execution consisting of ``Tasklet`` in a single step.
+* When number of data input < ``commit-interval`` in chunk method.
+* When an infinite loop has occurred within processing.
+====
+
+Explain how to stop the job below.
+
+* Stop from command line
+** Available for both synchronous and asynchronous jobs
+** Use ``-stop`` option of ``CommandLineJobRunner``
+
+[source,terminal]
+.The method of specifying the job name at startup
+----
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    classpath:/META-INF/jobs/job01.xml job01 -stop
+----
+
+* Stopping a job by its name specification is suitable for synchronous batch execution when jobs with the same name rarely start in parallel.
+
+[source,terminal]
+.The method of specifying the job execution ID (JobExecutionId)
+----
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    classpath:/META-INF/jobs/job01.xml 3 -stop
+----
+
+* Stopping a job by JobExecutionId specification is suitable for asynchronous batch execution when jobs with tha same name often start in parallel.
+
+[TIP]
+====
+* For the confirmation method of JobExecutionId, refer to <<Ch07_JobManagement_JobStatusManagement_Retrieve>>.
+* ``JobOpertion#stop()`` can be used to stop the job based on the JobExecutionId. +
+For stopping jobs using ``JobOperation#stop()``,
+refer to <<Ch04_AsyncJobWithWebContainer.adoc#Ch04_AsyncJobWithWeb_HowToExtend_Stop_And_Restart,"Stopping and restarting jobs">>.
+====
+
+[[Ch07_JobManagement_ExitCode]]
+=== Customizing Exit Codes
+When the job is terminated by synchronous execution, the exit code of the java process can be customized according to the exit code of the job or step.
+To customize the exit code, the following operations are required.
+
+. Change exit code of step.
+. Change exit code of job in accordance with exit code of step.
+. Map exit code of job and exit code of java process.
+
+[NOTE]
+.About significance of exit code
+====
+In this section, exit codes are handled with two significances and respective explanations are given below.
+
+* Exit code of character strings like COMPLETED, FAILED are considered as exit codes of job or step.
+* Exit code of numerical values like 0, 255 are considered as exit codes of Java process.
+====
+
+==== Change exit codes of step
+How to change exit code of step for each process model is shown below.
+
+Change exit code of step in chunk model::
+
+Implement afterStep method of StepExecutionListener as a process while terminating step and return exit code of any step.
+
+[source,java]
+.An implementation example of StepExecutionListener
+----
+@Component
+public class ExitStatusChangeListener implements StepExecutionListener {
+
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+
+        ExitStatus exitStatus = stepExecution.getExitStatus();
+        if (conditionalCheck(stepExecution)) {
+            // (1)
+            exitStatus = new ExitStatus("CUSTOM STEP FAILED");
+        }
+        return exitStatus;
+    }
+
+    private boolean conditionalCheck(StepExecution stepExecution) {
+        // omitted.
+    }
+}
+----
+
+[source,xml]
+.Job definition
+----
+<batch:step id="exitstatusjob.step">
+    <batch:tasklet transaction-manager="transactionManager">
+        <batch:chunk reader="reader" writer="writer" commit-interval="10" />
+    </batch:tasklet>
+    <batch:listeners>
+        <batch:listener ref="exitStatusChangeListener"/>
+    </batch:listeners>
+</batch:step>
+----
+
+[cols="20,80", options="header"]
+.List of implementation contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Set custom exit code according to the execution result of step.
+
+|===
+
+Change exit code of step in tasklet model::
+
+  Configure exit code of any step in StepContribution - an argument of execute method of Tasklet.
+
+[source,java]
+.Tasklet implementation example
+----
+@Override
+public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+
+    // omitted.
+    if (errorCount > 0) {
+        contribution.setExitStatus(new ExitStatus("STEP COMPLETED WITH SKIPS"));  // (1)
+    }
+    return RepeatStatus.FINISHED;
+}
+----
+
+[cols="20,80", options="header"]
+.List of implementation contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Configure a unique exit code in accordance with the execution results of tasklet.
+
+|===
+
+==== Change exit code of job
+Implement afterJob method of JobExecutionListener as a process while terminating the job and configure exit code of last job by exit code of each step.
+
+[source,java]
+.An Implementation example of JobExecutionListener
+----
+@Component
+public class JobExitCodeChangeListener extends JobExecutionListenerSupport {
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        // (1)
+	for (StepExecution stepExecution : jobExecution.getStepExecutions()) {
+            if ("STEP COMPLETED WITH SKIPS".equals(stepExecution.getExitStatus().getExitCode())) {
+                jobExecution.setExitStatus(new ExitStatus("JOB COMPLETED WITH SKIPS"));
+                logger.info("Change status 'JOB COMPLETED WITH SKIPS'");
+                break;
+            }
+
+        }
+    }
+}
+----
+
+[source,xml]
+.Job definition
+----
+<batch:job id="exitstatusjob" job-repository="jobRepository">
+    <batch:step id="exitstatusjob.step">
+        <!-- omitted -->
+    </batch:step>
+    <batch:listeners>
+        <batch:listener ref="jobExitCodeChangeListener"/>
+    </batch:listeners>
+</batch:job>
+----
+
+[cols="20,80", options="header"]
+.List of implementation contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Set the final job exit code to ``JobExecution`` according to the execution result of the job. +
+In this case, if ``CUSTOM STEP FAILED`` is included in one of the exit codes returned from the step,
+It has an exit code ``CUSTOM FAILED``.
+
+|===
+
+==== Mapping of exit codes
+Define the mapping between exit code of job and exit code of the process.
+
+[source,xml]
+.launch-context.xml
+----
+<!-- exitCodeMapper -->
+<bean id="exitCodeMapper"
+      class="org.springframework.batch.core.launch.support.SimpleJvmExitCodeMapper">
+    <property name="mapping">
+        <util:map id="exitCodeMapper" key-type="java.lang.String"
+                  value-type="java.lang.Integer">
+            <!-- ExitStatus -->
+            <entry key="NOOP" value="0" />
+            <entry key="COMPLETED" value="0" />
+            <entry key="STOPPED" value="255" />
+            <entry key="FAILED" value="255" />
+            <entry key="UNKNOWN" value="255" />
+            <entry key="CUSTOM FAILED" value="100" /> <!-- Custom Exit Status -->
+        </util:map>
+    </property>
+</bean>
+----
+
+[WARNING]
+.Process exit code 1 is prohibited
+====
+Generally, when a Java process is forcibly terminated due to a VM crash or SIGKILL signal reception,
+the process may return 1 as the exit code.
+Since it should be clearly distinguished from the exit code of a batch application regardless of whether it is normal or abnormal,
+do not define 1 as a process exit code within an application.
+====
+
+[TIP]
+.About the difference between status and exit code
+====
+There are "status (``STATUS``)" and "exit code (``EXIT_CODE``)" as the states of jobs and steps managed by ``JobRepository``, but they differ in the following points.
+
+* The status can not be customized because it is used in internal control of {SB} and specific value by enum type ``BatchStatus`` is defined.
+* The exit code can be used for job flow control and process exit code change, and can be customized.
+====
+
+[[Ch07_JobManagement_DuplicateSafe]]
+=== Double Activation Prevention
+
+In {SB}, when running a job,
+confirm whether the following combination exists from ``JobRepositry`` to ``JobInstance(BATCH_JOB_INSTANCE table)``.
+
+* Job name to be activated
+* Job parameters
+
+{batch5_shortname} makes it possible to activate multiple times even if the combinations of job and job parameters match. +
+That is, it allows double activation.
+For details, refer to <<Ch04_JobParameter.adoc#,Job Activation Parameter>>
+
+In order to prevent double activation, it is necessary to execute in the job scheduler or application. +
+Detailed means are strongly dependent on job scheduler products and business requirements, so omitted here. +
+Consider whether it is necessary to suppress double start for each job.
+
+[[Ch07_JobManagement_Logging]]
+=== Logging
+Explain log setting method.
+
+Log output, settings and considerations are in common with {server5_shortname}.
+At first, refer to {server5_url}/ArchitectureInDetail/GeneralFuncDetail/Logging.html[Logging].
+
+Explain specific considerations of {batch5_shortname} here.
+
+==== Clarification of log output source
+
+It is necessary to be able to clearly specify the output source job and job execution at the time of batch execution.
+Therefore, it is good to output the thread name, the job name and the job execution ID.
+Especially at asynchronous execution, since jobs with the same name will operate in parallel with different threads,
+recording only the job name may make it difficult to specify the log output source.
+
+Each element can be realized in the following way.
+
+Thread name::
+  Specify ``%thread`` which is the output pattern of ``logback.xml``
+Job name / Job Execution ID::
+  Create a component implementing ``JobExecutionListener`` and record it at the start and end of the job
+
+[source,java]
+.An implementation example of JobExecutionListener
+----
+// package and import omitted.
+
+@Component
+public class JobExecutionLoggingListener implements JobExecutionListener {
+    private static final Logger logger =
+            LoggerFactory.getLogger(JobExecutionLoggingListener.class);
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        // (1)
+        logger.info("job started. [JobName:{}][jobExecutionId:{}]",
+            jobExecution.getJobInstance().getJobName(), jobExecution.getId());
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        // (2)
+        logger.info("job finished.[JobName:{}][jobExecutionId:{}][ExitStatus:{}]"
+                , jobExecution.getJobInstance().getJobName(),
+                , jobExecution.getId(), jobExecution.getExitStatus().getExitCode());
+    }
+
+}
+----
+
+[source,xml]
+.Job Bean definition file
+----
+<!-- omitted. -->
+<batch:job id="loggingJob" job-repository="jobRepository">
+    <batch:step id="loggingJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <!-- omitted. -->
+        </batch:tasklet>
+    </batch:step>
+    <batch:listeners>
+        <!-- (3) -->
+        <batch:listener ref="jobExecutionLoggingListener"/>
+    </batch:listeners>
+</batch:job>
+<!-- omitted. -->
+----
+
+[cols="40,60", options="header"]
+.An example of log output of job name and job execution ID
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Before starting the job, the job name and job execution ID are output to the INFO log.
+
+|(2)
+|When the job ends, an exit code is also output in addition to (1).
+
+|(3)
+|Associate ``JobExecutionLoggingListener`` registered as a component with the bean definition of a specific job.
+
+|===
+
+==== Log Monitoring
+In the batch application, the log is the main user interface of the operation.
+Unless the monitoring target and the actions at the time of occurrence are clearly designed,
+filtering becomes difficult and there is a danger that logs necessary for action are buried.
+For this reason, it is advisable to determine in advance a message or code system to be a keyword to be monitored for logs.
+For message management to be output to the log, refer to <<Ch07_JobManagement_MessageManagement,"Message Management">> below.
+
+==== Log Output Destination
+For log output destinations in batch applications, it is good to design in which units logs are distributed / aggregated.
+For example, even when logs are output to a flat file, multiple patterns are considered as follows.
+
+* Output to 1 file per 1 job
+* Output to 1 file in units of multiple jobs grouped together
+* 1 Output to 1 file per server
+* Output multiple servers in 1 file
+
+In each case, depending on the total number of jobs / the total amount of logs / I/O rate to be generated in the target system,
+it is decided which unit is best to be grouped.
+It also depends on how to check logs. It is assumed that options will change depending on the utilization method
+such as whether to refer frequently from the job scheduler or from the console frequently.
+
+The important thing is to carefully examine the log output in operational design and to verify the usefulness of the log in the test.
+
+[[Ch07_JobManagement_MessageManagement]]
+=== Message Management
+Explain message management.
+
+In order to prevent variations in the code system and to facilitate designing extraction as a keyword to be monitored,
+it is desirable to give messages according to certain rules.
+
+As with logging, message management is basically the same as {server5_shortname}.
+
+[IMPORTANT]
+.About utilization of MessageSource
+====
+``MessageSource`` can be used to use messages from property files.
+
+* For specific settings and implementation examples,
+  refer to {server5_url}/ArchitectureInDetail/GeneralFuncDetail/Logging.html#id8[Uniform management of log messages]
+
+** As a sample of log output here, it is exemplified along the case of the Spring MVC controller,
+   but please replace it to any component of {SB}.
+** Instance of ``MessageSource`` is generated independently here, but it is not necessary for {batch5_shortname}.
+   This is because each component is accessed only after ``ApplicationContext`` is created.
+   In {batch5_shortname}, it is set as follows.
+
+[source,xml]
+.launch-context.xml
+----
+<bean id="messageSource"
+      class="org.springframework.context.support.ResourceBundleMessageSource"
+      p:basenames="i18n/application-messages" />
+----
+==== 

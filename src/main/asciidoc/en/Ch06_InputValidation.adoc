@@ -1,0 +1,522 @@
+include::_include_all.adoc[]
+
+[[Ch06_InputValidation]]
+= Input Validation
+
+[[Ch06_InputValidation_Overview]]
+== Overview
+
+In this section, Explain the validation check of job input data (hereinafter referred to as input validation).
+
+This function is the same usage for chunk model and tasklet model.
+
+In general, input validation in batch processing is often carried out
+to confirm that data received from other systems etc. is valid in its own system. +
+Conversely, it can be said that it is unnecessary to perform input validation
+on reliable data in its own system (for example, data stored in the database).
+
+Please refer to
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html[input Validation] in {server5_guide}
+because the input validation duplicates the contents of {server5_shortname}.
+Explain the main comparisons below.
+
+[cols="30,35,35", options="header"]
+.Main comparison list
+|===
+
+|Comparison target
+|{server5_shortname}
+|{batch5_shortname}
+
+|Available input validation rules
+2+^|Same as {server5_shortname}
+
+|The target to which the rule is attached
+|``form class``
+|``DTO``
+
+|Validation execute method
+|``Give @Validated annotation to the Controller``
+|``Call the API of Validator class``
+
+|Setting error messages
+2+^|Same as
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html?highlight=validationmessages#validation-message-def[Definition of error messages] in {server5_guide}.
+
+|Error message output destination
+|View
+|Log etc.
+
+|===
+
+The input validation to be explained in this section mainly covers data obtained from ``ItemReader``. +
+For checking job parameters, refer to <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_ParamsValidation,Validation check of parameters>>.
+
+[[Ch06_InputValidation_Overview_Category]]
+=== Classification of input validation
+
+The input validation is classified into single item check and correlation item check.
+
+[cols="15,30,25,30", options="header"]
+.List of setting contents
+|===
+|Type
+|Description
+|Example
+|Implementation method
+
+|Single item check
+|Check to be completed with a single field
+|Required input check +
+Digit check +
+Type check
+|Bean Validation (using Hibernate Validator as implementation library)
+
+|Correlation item check
+|Check to compare multiple fields
+|Comparison of numerical values +
+Comparison of dates
+|``Validation`` class that implements ``org.springframework.validation.Validator`` interface +
+or Bean Validation
+|===
+
+Spring supports Bean Validation which is a Java standard.
+For this single item check, this Bean Validation is used.
+For correlation item check, use Bean Validation of the ``org.springframework.validation.Validator`` interface provided by Spring.
+
+In this respect,
+same as {server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html#id3[Classification of input validation] in {server5_guide}.
+
+[[Ch06_InputValidation_Overview_architecture]]
+=== Overview of Input Validation
+
+The timing of input validation in the chunk model and tasklet model is as follows. +
+
+* For chunk model, use ``ItemProcessor``
+* For tasklet model, use ``Tasklet#execute()`` at an arbitrary timing.
+
+In the chunk model and tasklet model, the implementation method of input validation is the same,
+so here, explain the case where input validation is done in ``ItemProcessor`` of the chunk model.
+
+First, explain an overview of input validation. The relationships of classes related to input validation are as follows.
+
+.Related class of input validation
+image::Ch06_InputValidation_Architecture_classes.png[InputValidation architecture]
+
+* Inject ``org.springframework.batch.item.validator.SpringValidator`` which is
+  the implementation of ``org.springframework.batch.item.validator.Validator`` in ``ItemProcessor`` and execute the validate method.
+** ``SpringValidator`` internally holds ``org.springframework.validation.Validator`` and execute the validate method. +
+  It can be said that it is a wrapper for ``org.springframework.validation.Validator``. +
+  The implementation of ``org.springframework.validation.Validator`` is
+  ``org.springframework.validation.beanvalidation.LocalValidatorFactoryBean``.
+  Use Hibernate Validator through this class.
+* Implement ``org.springframework.batch.item.ItemCountAware`` in the input DTO to determine where the input validation error occured.
+
+[IMPORTANT]
+.Setting the number of data
+====
+``ItemCountAware#setItemCount`` is set by ``AbstractItemCountingItemStreamItemReader``.
+Therefore, if you do not use ``ItemReader`` in the tasklet model, it will not be updated.
+In this case, it is necessary for the user to set what error occurred in the data.
+====
+
+[IMPORTANT]
+.Validators such as javax.validation.Validator or org.springframework.validation.Validator should not be used directly.
+====
+Validators such as ``javax.validation.Validator`` or ``org.springframework.validation.Validator`` should not be used directly,
+use ``org.springframework.batch.item.validator.SpringValidator``.
+
+``SpringValidator`` is wrapper of ``org.springframework.validation.Validator``. +
+``SpringValidator`` wraps the raised exception in ``BindException`` and throws it as ``ValidationException``. +
+Therefore, ``BindException`` can be accessed via ``ValidationException`` which makes flexible handling easier.
+
+On the other hand, if validators such as ``javax.validation.Validator`` and ``org.springframework.validation.Validator`` are used directly, it will be cumbersome logic to process the information that caused the validation error.
+====
+
+[IMPORTANT]
+.Do not use org.springframework.batch.item.validator.ValidatingItemProcessor
+====
+The input validation by ``org.springframework.validation.Validator``
+can also be realized by using ``ValidatingItemProcessor`` provided by {SB}.
+
+However, depending on the circumstances, it is necessary to extend it because of the following reasons,
+so do not use it from the viewpoint of unifying the implementation method.
+
+* input validation error can not be handled and processing can not be continued.
+* It is not possible to flexibly deal with data that has become an input validation error.
+** It is assumed that the processing for the data that becomes the input validation error becomes various kinds by the user (only log output, save error data to another file, etc.).
+====
+
+[[Ch06_InputValidation_HowToUse]]
+== How to use
+
+As mentioned earlier, the implementation method of input validation is the same as {server5_shortname} as follows.
+
+* single item check uses Bean Validation.
+* correlation item check uses Bean Validation or the ``org.springframework.validation.Validator`` interface provided by Spring.
+
+Explain The method of input validation in the following order.
+
+* <<Ch06_InputValidation_HowToUse_Settings>>
+* <<Ch06_InputValidation_HowToUse_defRules>>
+* <<Ch06_InputValidation_HowToUse_Execution>>
+* <<Ch06_InputValidation_HowToUse_ErrorHandling>>
+
+[[Ch06_InputValidation_HowToUse_Settings]]
+=== Various settings
+
+Use Hibernate Validator for input validation.
+Confirm that the definition of Hibernate Validator is in the library dependency and that the required bean definition exists.
+These have already been set in the blank project provided by {batch5_shortname}.
+
+[source, xml]
+.Setting example of dependent library
+----
+<dependency>
+    <groupId>org.hibernate</groupId>
+    <artifactId>hibernate-validator</artifactId>
+</dependency>
+----
+
+[source, xml]
+.launch-context.xml
+----
+<bean id="validator" class="org.springframework.batch.item.validator.SpringValidator"
+      p:validator-ref="beanValidator"/>
+
+<bean id="beanValidator"
+      class="org.springframework.validation.beanvalidation.LocalValidatorFactoryBean" />
+----
+
+.Error message setting
+
+As mentioned earlier, for setting of error messages,
+refer to
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html?highlight=validationmessages#validation-message-def[Definition of error messages] in {server5_guide}.
+
+[[Ch06_InputValidation_HowToUse_defRules]]
+=== Input validation rule definition
+
+The target of implementing the rule of input validation is the DTO obtained through ``ItemReader``.
+Implement the DTO obtained through ``ItemReader`` as follows.
+
+* Implement ``org.springframework.batch.item.ItemCountAware`` in the input DTO to determine where the input validation error occured.
+** In the ``setItemCount`` method, hold a numerical value in the class field indicating the number of items read in the currently processed item received as an argument.
+* Define the input validation rule.
+** refer to {server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html[Input Validation] in {server5_guide}.
+
+Show an example of a DTO defining an input validation rule below.
+
+[source,java]
+.An example of a DTO defining an input validation rule
+----
+public class VerificationSalesPlanDetail implements ItemCountAware {  // (1)
+
+    private int count;
+
+    @NotEmpty
+    @Size(min = 1, max = 6)
+    private String branchId;
+
+    @NotNull
+    @Min(1)
+    @Max(9999)
+    private int year;
+
+    @NotNull
+    @Min(1)
+    @Max(12)
+    private int month;
+
+    @NotEmpty
+    @Size(min = 1, max = 10)
+    private String customerId;
+
+    @NotNull
+    @DecimalMin("0")
+    @DecimalMax("9999999999")
+    private BigDecimal amount;
+
+    @Override
+    public void setItemCount(int count) {
+        this.count = count;  // (2)
+    }
+
+    // omitted getter/setter
+}
+----
+
+[cols="10,90", options="header"]
+.List of setting contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Implement the ``ItemCountAware`` class and override the ``setItemCount`` method. +
+``ItemCountAware#setItemCount()`` is passed to the argument as to what the data read by ``ItemReader`` is.
+
+|(2)
+|Holds the ``count`` received in the argument in the class field. +
+This value is used to determine the number of items of data that caused an input validation error.
+|===
+
+[[Ch06_InputValidation_HowToUse_Execution]]
+=== Input validation execution
+
+Explain how to implement input validation.
+Implement input validation execution as follows.
+
+* Execute ``org.springframework.batch.item.validator.Validator#validate()`` in the implementation of ``ItemProcessor``.
+** Use an instance of ``SpringValidator`` by injecting it as ``Validator`` field.
+* Handle input validation error. For details, refer to <<Ch06_InputValidation_HowToUse_ErrorHandling>>.
+
+Show an implementation example of input validation below.
+
+[source,java]
+.An implementation example of input validation
+----
+@Component
+public class ValidateAndContinueItemProcessor implements ItemProcessor<VerificationSalesPlanDetail, SalesPlanDetail> {
+    @Inject  // (1)
+    Validator<VerificationSalesPlanDetail> validator;
+
+    @Override
+    public SalesPlanDetail process(VerificationSalesPlanDetail item) throws Exception {
+        try {  // (2)
+            validator.validate(item);  // (3)
+        } catch (ValidationException e) {
+          // omitted exception handling
+        }
+
+        SalesPlanDetail salesPlanDetail = new SalesPlanDetail();
+        // omitted business logic
+
+        return salesPlanDetail;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.List of setting contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Inject ``SpringValidator`` instance. +
+For the type argument of ``org.springframework.batch.item.validator.Validator``, set the DTO to be acquired via ``ItemReader``.
+
+|(2)
+|Handle input validation error. +
+In the example, exception is handled by catching with try/catch. +
+For details, refer to <<Ch06_InputValidation_HowToUse_ErrorHandling>>.
+
+|(3)
+|Execute ``Validator#validate()`` with the DTO obtained through ``ItemReader`` as an argument.
+|===
+
+[[Ch06_InputValidation_HowToUse_ErrorHandling]]
+=== Input validation error handling
+
+There are following 2 ways to handle input validation error.
+
+. Processing is aborted at the time when input validation error occurs, abnormally end the job.
+. Leave the occurrence of input validation error in the log etc. and continue processing the subsequent data. Thereafter, at the end of the job, the job is ended by specifying a warning.
+
+[[Ch06_InputValidation_HowToUse_ErrorHandling_Abend]]
+==== Abnormal Termination of Processing
+
+In order to abnormally terminate processing when an exception occurs, it throws ``java.lang.RuntimeException`` or its subclass.
+
+There are two ways to perform processing such as log output when an exception occurs.
+
+. Catch exceptions with try/catch and do it before throwing an exception.
+. Do not catch exceptions with try/catch, implement ``ItemProcessListener`` and do it with the onProcessError method.
+** ``ItemProcessListener#onProcessError()`` can be implemented using the ``@OnProcessError`` annotation.
+   For details, refer to <<Ch04_Listener.adoc#,Listener>>.
+
+Following is an example of logging exception information and abnormally terminating processing when an exception occurs.
+
+[source,java]
+.An error handling example with try/catch
+----
+@Component
+public class ValidateAndAbortItemProcessor implements ItemProcessor<VerificationSalesPlanDetail, SalesPlanDetail> {
+    /**
+     * Logger.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(ValidateAndAbortItemProcessor.class);
+
+    @Inject
+    Validator<VerificationSalesPlanDetail> validator;
+
+    @Override
+    public SalesPlanDetail process(VerificationSalesPlanDetail item) throws Exception {
+        try {  // (1)
+            validator.validate(item);  // (2)
+        } catch (ValidationException e) {
+            // (3)
+            logger.error("Exception occurred in input validation at the {} th item. [message:{}]",
+                    item.getCount(), e.getMessage());
+            throw e;  // (4)
+        }
+
+        SalesPlanDetail salesPlanDetail = new SalesPlanDetail();
+        // omitted business logic
+
+        return salesPlanDetail;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.List of setting contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Catch exceptions with try/catch.
+
+|(2)
+|Execute input validation.
+
+|(3)
+|Perform log output processing before throwing an exception.
+
+|(4)
+|Throw exceptions +
+Since ``org.springframework.batch.item.validator.ValidationException`` is a subclass of ``RuntimeException``,
+it can be thrown as it is.
+|===
+
+[source,java]
+.An error handling example with ItemProcessListener#OnProcessError
+----
+@Component
+public class ValidateAndAbortItemProcessor implements ItemProcessor<VerificationSalesPlanDetail, SalesPlanDetail> {
+
+    /**
+     * Logger.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(ValidateAndAbortItemProcessor.class);
+
+    @Inject
+    Validator<VerificationSalesPlanDetail> validator;
+
+    @Override
+    public SalesPlanDetail process(VerificationSalesPlanDetail item) throws Exception {
+        validator.validate(item);  // (1)
+
+        SalesPlanDetail salesPlanDetail = new SalesPlanDetail();
+        // omitted business logic
+
+        return salesPlanDetail;
+    }
+
+    @OnProcessError  // (2)
+    void onProcessError(VerificationSalesPlanDetail item, Exception e) {
+        // (3)
+        logger.error("Exception occurred in input validation at the {} th item. [message:{}]", item.getCount() ,e.getMessage());
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.List of setting contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Execute input validation.
+
+|(2)
+|Implement ``ItemProcessListener#onProcessError()`` using ``@OnProcessError`` annotation.
+
+|(3)
+|Perform log output processing before throwing an exception.
+
+|===
+
+[WARNING]
+.Note on using ItemProcessListener#onProcessError()
+====
+Using of the onProcessError method is useful for improving the readability of source code, maintainability, etc. since business process and exception handling can be separated. +
+However, when an exception other than ``ValidationException`` performing handling processing in the above example occurs, the same method is executed, so it is necessary to be careful.
+
+When outputting log output in ``ItemProcessor#process()`` by exception,
+it is necessary to judge the kind of exception caused by the onProcessError method and handle exception.
+If this is cumbersome, it is good to share responsibility so that only input validation errors are handled by handling with try / catch and others are handed over to listeners.
+====
+
+[[Ch06_InputValidation_HowToUse_ErrorHandling_Skip]]
+==== Skipping Error Records
+
+After logging the information of the record where input validation error occurred, skip the record where the error occurred and continue the processing of the subsequent data as follows.
+
+* Catch exceptions with try/catch.
+* Perform log output etc. when an exceptions occurs.
+* Return ``null`` as the return value of ``ItemProcessor#process()``.
+** By returning ``null``, records in which an input validation error occurs are no longer included in subsequent processing targets (output with ``ItemWriter``).
+
+[source,java]
+.A skipping example with ItemProcessor
+----
+@Component
+public class ValidateAndContinueItemProcessor implements ItemProcessor<VerificationSalesPlanDetail, SalesPlanDetail> {
+    /**
+     * Logger.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(ValidateAndContinueItemProcessor.class);
+
+    @Inject
+    Validator<VerificationSalesPlanDetail> validator;
+
+    @Override
+    public SalesPlanDetail process(VerificationSalesPlanDetail item) throws Exception {
+        try {  // (1)
+            validator.validate(item);  // (2)
+        } catch (ValidationException e) {
+            // (3)
+            logger.warn("Skipping item because exception occurred in input validation at the {} th item. [message:{}]",
+                    item.getCount(), e.getMessage());
+            // (4)
+            return null;  // skipping item
+        }
+
+        SalesPlanDetail salesPlanDetail = new SalesPlanDetail();
+        // omitted business logic
+
+        return salesPlanDetail;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.List of setting contents
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Catch exceptions with try/catch
+
+|(2)
+|Execute the input validation.
+
+|(3)
+|Perform log output processing before returning ``null``.
+
+|(4)
+|Return ``null`` to skip this data and move on to the next data processing.
+|===
+
+[[Ch06_InputValidation_HowToUse_ErrorHandling_ExitCode]]
+==== Setting the exit code
+
+When an input validation error occurs, in order to distinguish between the case where input validation error did not occur and the state of the job, be sure to set an exit code that is not a normal termination. +
+If data with input validation error is skipped, setting of exit code is required even when abnormal termination occurs.
+
+For details on how to set the exit code, refer to <<Ch07_JobManagement.adoc#,Job Management>>.

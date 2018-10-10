@@ -1,0 +1,367 @@
+include::_include_all.adoc[]
+
+[[Ch02_TerasolunaBatchStack]]
+= TERASOLUNA Batch Framework for Java (5.x) stack
+
+[[Ch02_TerasolunaBatchStack_Overview]]
+== Overview
+{batch5_fullname}configuration is explained and {batch5_fullname} scope of responsibility.
+
+[[Ch02_TerasolunaBatchStack_Stack]]
+== {batch5_fullname} stack
+Software Framework used in {batch5_fullname} is a combination of OSS
+focusing on http://projects.spring.io/spring-framework/[Spring Framework] (http://projects.spring.io/spring-batch/[{SB}])
+A stack schematic diagram of {batch5_fullname} is shown below.
+
+.{batch5_fullname} stack - schematic diagram
+image::Ch02_TerasolunaBatchStack_Stack.png[{batch5_fullname} Stack]
+
+Descriptions for products like job scheduler and database are excluded from this guideline.
+
+=== OSS version to be used
+List of OSS versions to be used in {batch5_version} of {batch5_fullname} is given below.
+
+[NOTE]
+====
+OSS version to be used in {batch5_fullname} as a rule conforms to definition of Spring IO platform.
+Note that, version of Spring IO platform in {batch5_version} is
+http://docs.spring.io/platform/docs/Athens-SR2/reference/htmlsingle/[Athens-SR2].+
+For details of Spring IO platform, refer
+{server5_url}/Overview/FrameworkStack.html#oss[OSS version to be used] of  {server5_fullname}.
+====
+
+[cols="25,25,25,15,5,5", options="header"]
+.OSS version list
+|===
+|Type
+|GroupId
+|ArtifactId
+|Version
+|Spring IO platform
+|Remarks
+
+|Spring
+|org.springframework
+|spring-aop
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-beans
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-context
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-expression
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-core
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-tx
+|4.3.5.RELEASE
+^|*
+|
+
+|Spring
+|org.springframework
+|spring-jdbc
+|4.3.5.RELEASE
+^|*
+|
+
+|{SB}
+|org.springframework.batch
+|spring-batch-core
+|3.0.7.RELEASE
+^|*
+|
+
+|{SB}
+|org.springframework.batch
+|spring-batch-infrastructure
+|3.0.7.RELEASE
+^|*
+|
+
+|Spring Retry
+|org.springframework.retry
+|spring-retry
+|1.1.5.RELEASE
+^|*
+|
+
+|Java Batch
+|javax.batch
+|javax.batch-api
+|1.0.1
+^|*
+|
+
+|Java Batch
+|com.ibm.jbatch
+|com.ibm.jbatch-tck-spi
+|1.0
+^|*
+|
+
+|MyBatis3
+|org.mybatis
+|mybatis
+|3.4.2
+|
+|
+
+|MyBatis3
+|org.mybatis
+|mybatis-spring
+|1.3.1
+|
+|
+
+|MyBatis3
+|org.mybatis
+|mybatis-typehandlers-jsr310
+|1.0.2
+|
+|
+
+|DI
+|javax.inject
+|javax.inject
+|1
+^|*
+|
+
+|Log output
+|ch.qos.logback
+|logback-classic
+|1.1.8
+^|*
+|
+
+|Log output
+|ch.qos.logback
+|logback-core
+|1.1.8
+^|*
+^|*1
+
+|Log output
+|org.slf4j
+|jcl-over-slf4j
+|1.7.22
+^|*
+|
+
+|Log output
+|org.slf4j
+|slf4j-api
+|1.7.22
+^|*
+|
+
+|Input check
+|javax.validation
+|validation-api
+|1.1.0.Final
+^|*
+|
+
+|Input check
+|org.hibernate
+|hibernate-validator
+|5.2.4.Final
+^|*
+|
+
+|Input check
+|org.jboss.logging
+|jboss-logging
+|3.3.0.Final
+^|*
+^|*1
+
+|Input check
+|com.fasterxml
+|classmate
+|1.3.3
+^|*
+^|*1
+
+|Connection pool
+|org.apache.commons
+|commons-dbcp2
+|2.1.1
+^|*
+|
+
+|Connection pool
+|org.apache.commons
+|commons-pool2
+|2.4.2
+^|*
+|
+
+|Expression Language
+|org.glassfish
+|javax.el
+|3.0.0
+^|*
+|
+
+|In-memory database
+|com.h2database
+|h2
+|1.4.193
+^|*
+|
+
+|XML
+|com.thoughtworks.xstream
+|xstream
+|1.4.9
+^|*
+^|*1
+
+|XML
+|xmlpull
+|xmlpull
+|1.1.3.1
+|
+^|*1
+
+|XML
+|xpp
+|xpp3_min
+|1.1.4c
+|
+^|*1
+
+|XML
+|xpp
+|xpp3_min
+|1.1.4c
+|
+^|*1
+
+|JSON
+|org.codehaus.jettison
+|jettison
+|1.2
+^|*
+^|*1
+
+|===
+
+.Remarks
+====
+. Libraries which individually depend on libraries supported by Spring IO platform
+====
+
+[[Ch02_TerasolunaBatchStack_Components]]
+== Structural elements of {batch5_fullname}
+Software Framework structural elements of {batch5_fullname} are explained.
+
+.Schematic diagram of Software Framework structural elements
+image::Ch02_TerasolunaBatchStack_Stack_Detail.png[{batch5_fullname} Components of Software Framework]
+
+Overview of each element is shown below.
+
+Foundation framework::
+  Spring Framework is used as a framework foundation. Various functions are applied starting with DI container.
+
+  ** http://docs.spring.io/spring/docs/4.3.5.RELEASE/spring-framework-reference/htmlsingle/#spring-core[Spring Framework 4.3]
+
+Batch framework::
+  {SB} is used as a batch framework.
+
+  ** http://docs.spring.io/spring-batch/trunk/reference/html/index.html[{SB} 3.0]
+
+Asynchronous execution::
+  Following functions are used as a method to execute asynchronous execution.
+
+  Periodic activation by using DB polling:::
+  A library offered by {batch5_fullname} is used.
+
+  *** <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">>
+
+  Web container activation:::
+  Link with {SB} using Spring MVC.
+
+  *** http://docs.spring.io/spring/docs/4.3.5.RELEASE/spring-framework-reference/html/mvc.html[Spring MVC 4.3]
+
+O/R Mapper::
+  Use MyBatis, and use MyBatis-Spring as a library to coordinate with Spring Framework.
+
+  ** http://www.mybatis.org/mybatis-3/[MyBatis 3.4]
+  ** http://www.mybatis.org/spring/[MyBatis-Spring]
+
+File access::
+  In addition to http://docs.spring.io/spring-batch/trunk/reference/html/readersAndWriters.html#flatFiles[Function offered from {SB}],
+  {batch5_fullname} is used as an auxiiliary function.
+
+  ** <<Ch05_FileAccess.adoc#Ch05_FileAccess,"File access">>
+
+Logging::
+  Logger uses SLF4J in API and Logback in the implementation.
+
+  ** https://www.slf4j.org/[SLF4J]
+  ** https://logback.qos.ch/[Logback]
+
+Validation::
+  Unit item check:::
+    Bean Validation is used in unit item check and Hibernate Validator is used for implementation.
+
+      *** http://download.oracle.com/otn-pub/jcp/bean_validation-1_1-fr-eval-spec/bean-validation-specification.pdf[Bean Validation 1.1]
+      *** http://docs.jboss.org/hibernate/validator/5.2/reference/en-US/html/[Hibernate Validator 5.2]
+
+  Correlation check:::
+    Bean Validation or Spring Validation is used for correlation check.
+
+      *** http://docs.spring.io/spring/docs/4.3.5.RELEASE/spring-framework-reference/html/validation.html#validator[Spring Validation]
+
+Connection pool::
+  DBCP is used in the connection pool.
+
+  ** https://commons.apache.org/proper/commons-dbcp/[DBCP 2]
+  ** https://commons.apache.org/proper/commons-pool/[Commons Pool 2]
+
+[Ch02_TerasolunaBatchStack_TerasolunaBatchLibraries]
+=== A function wherein {batch5_fullname} provides implementation
+A function wherein {batch5_fullname} provides implementation is given below.
+
+[cols="40,60"]
+.A function list wherein {batch5_fullname} offers implementation
+|===
+|Function name
+|Overview
+
+|<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">>
+| Asynchronous execution using DB polling is implemented.
+
+.3+.^|<<Ch05_FileAccess.adoc#Ch05_FileAccess,"File access">>
+|Read fixed-length file without line breaks by number of bytes.
+|Break down a fixed length record in individual field by number of bytes.
+|Control output of enclosed characters by variable length records.
+
+|===

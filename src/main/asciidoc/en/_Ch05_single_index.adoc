@@ -1,0 +1,22 @@
+[[Ch05]]
+= Input/Output of Data
+include::_include_all.adoc[]
+
+// Go down a level further to link the documents starting from the section 
+:leveloffset: +1
+
+include::Ch05_Transaction.adoc[]
+
+<<<
+
+include::Ch05_DBAccess.adoc[]
+
+<<<
+
+include::Ch05_FileAccess.adoc[]
+
+<<<
+
+include::Ch05_ExclusiveControl.adoc[]
+
+:leveloffset: -1

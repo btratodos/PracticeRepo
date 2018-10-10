@@ -1,0 +1,385 @@
+include::_include_all.adoc[]
+
+[[Ch06_RerunRestart]]
+= Restart processing
+
+[[Ch06_RerunRestart_Overview]]
+== Overview
+After the job gets terminated abnormally due to occurence of some failure,means to recover to restart the job is explained.
+
+Since this function has different usage for chunk model and tasklet model, each will be explained.
+
+There are the following methods to restart a job.
+
+. Job rerun
+. Job restart
+** Stateless restart
+*** Number based restart
+** Stateful restart
+*** Determine processing status, restart process to extract unprocessed data
+**** It is necessary to separately implement a process for identifying the processing state
+
+Below is terminology definition:
+
+Rerun::
+  Redoing the job from the beginning. +
+  As a preliminary work, it is necessary to recover to the state before failure occurred such as initializing data,at the time of starting the job.
+Restart::
+  Resume the processing from where the job was interrupted. +
+  It is necessary to design/implement retention of restart position processing, acquisition method, data skip method till restart position etc in advance. +
+  There are two types of restart, stateless and stateful.
+Stateless restart::
+  A restart method not considering the state (unprocessed / processed) for each input data.
+Number based restart::
+  One of stateless restart. +
+  A method of retaining the processed input data count and skipping that input data at the time of restart. +
+  If the output is a non-transactional resource, it is also necessary to hold the output position and move the write position to that position at the time of restart.
+Stateful restart::
+  A restart method in which the state (unprocessed / processed) for each input data is judged, and only unprocessed data is acquired as an acquisition condition. +
+  If the output is a non-transactional resource, make the resource additional, and at the time of restart, add it to the previous result.
+
+Generally rerun is the easiest way to re-execute.
+With Rerun < Stateless restart < Stateful restart order, it becomes difficult to design and implement.
+Of course, it is always preferable to use rerun if possible,
+For each job that the user implements, please consider which method to apply depending on the allowable batch window and processing characteristics.
+
+[[Ch06_RerunRestart_HowToUse]]
+== How to use
+Implementation method of Rerun and restart is explained.
+
+[[Ch06_RerunRestart_HowToUse_Rerun]]
+=== Job rerun
+How to implement job rerun is explained.
+
+. Preliminary work of data recovery such as initialization of data before re-run is carried out.
+. Execute the failed job again with the same condition (same parameter).
+** In {SB}, if you execute a job with the same parameters, it will be treated as double execution, but {batch5_shortname} treats it as a separate job +
+   For details,please refer<<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_Converter,"About parameter conversion class">>.
+
+[[Ch06_RerunRestart_HowToUse_Restart]]
+=== Job restart
+How to restart a job is explained.
+
+When restarting a job, it is basically done on a job executed synchronously.
+
+It is recommended that asynchronously executed jobs should be designed with a corresponding job design with a rerun instead of a restart.
+This is difficult to judge whether it is **"intended restart execution"** or **"unintended duplicate execution"**,
+this is because there is a possibility of confusion in operation.
+
+If restart requirements can not be excluded for asynchronous execution job,
+The following methods can be used to clarify **"intended restart execution"**.
+
+* Restart by ``-restart`` of ``CommandLineJobRunner``
+** Restart asynchronously executed job separately from synchronous execution. It becomes effective when progressing the recovery process sequentially.
+* Restart by ``JobOperator#restart(JobExecutionId)``
+** Restart the asynchronously executed job on the mechanism of asynchronous execution again.It is effective when progressing with recovery processing collectively.
+*** <<Ch04_AsyncJobWithDB.adoc#,Asynchronous execution(DB polling)>> does not support restart. Therefore, it is necessary to implement it separately by the user.
+*** <<Ch04_AsyncJobWithWebContainer.adoc#,Asynchronous execution(Web container)>> guides how to implement restart.User implements it according to this description.
+
+[IMPORTANT]
+.About restart when there is input check
+====
+The input check error is not recoverable unless the input resource causing the check error is corrected.
+For reference, an input resource correction example when an input check error occurs is shown below.
+
+. When an input check error occurs, log output is performed so that the target data can be specified.
+. Based on the output log information, correct the input data.
+** Make sure that the order of input data does not change.
+** Correction method differs according to generation method of input resource.
+*** Correct manually
+*** Recreate with job etc
+*** Retransmission from collaboration source
+. Deploy corrected input data and execute restart.
+====
+
+[NOTE]
+.In the case of multiple processing (Partition Step)
+====
+When restarting in <<Ch08_ParallelAndMultiple.adoc#Ch08_ParallelAndMultiple_Partitioning,"multiple processing(Partition Step)">>,
+processing is carried out again **from split processing**.
+When all of the data are processed as the result of dividing the data, unnecessary splitting is performed and recorded on ``JobRepository``,
+there is no problem such as data inconsistency caused by this.
+====
+
+[[Ch06_RerunRestart_HowToUse_Restart_Stateless]]
+=== Stateless restart
+How to implement stateless restart is explained.
+
+Stateless restart with {batch5_shortname} refers to a number based restart.This is implemented by using the mechanism of {SB} as it is. +
+The number based restart can be used in job execution of chunk model.
+In addition, the number based restart uses context information about inputs and outputs registered in ``JobRepository``.
+Therefore, in a number based restart, it is assumed that ``JobRepository`` does not use the in-memory database, but uses persistence guaranteed.
+
+[IMPORTANT]
+.About failure occurence of JobRepository
+====
+Updating to ``JobRepository`` is done in transactions that are independent of transactions of the database used by the business process. +
+In other words, only the failure to the business process is subject to recovery. +
+This means that if a failure occurs in ``JobRepository``, there is a possibility that it will deviate from the actual count of processes,
+it means that there is a danger of double processing at restart. +
+Therefore, it is necessary to consider how to deal with failure. For example, design availability of ``JobRepository`` higher, then review rerun's method in advance, and so on.
+====
+
+Input at restart::
+  Since most of the ItemReaders provided by {SB} are compatible with the number-based restart, special support is not necessary. +
+  If you want to create a number based restartable ItemReader yourself, the following abstract classes can be extended that have restart processing implemented.
+
+    :::
+    * ``org.springframework.batch.item.support.AbstractItemCountingItemStreamItemReader``
+
+  ::
+  Since the number based restart determines the restart starting point based only on the number of items to the last, it can not detect change / addition / deletion of input data.
+  Often the input data is corrected after the job ends abnormally,
+  When data change like the following, be careful as there will be a difference in the output between,
+  the result after the job ends normally and the result after the job ends abnormally is restarted and recovered.
+
+    :::
+    * Change the data acquisition order
+    ** At the time of restart, duplicate or unprocessed data will get generated, so never go as it results in a different recovery result from the result of rerun.
+    * Update processed data
+    ** Since the data updated at the time of restarting is skipped, it is not preferred as there are cases where rerun result and the recovered result by restart result changes.
+    * Update or add unprocessed data
+    ** As rerun result and recovered result becomes same, its allowed. However, it is different from the result of the normal termination in the first execution.
+       This should be used when patching abnormal data in an emergency coping manner or when processing as much as possible data received at the time of execution.
+
+Output at Restart::
+  Care must be taken in output to non-transactional resources. For example in a file, it is necessary to grasp the position to which the output was made and output from that position. +
+  The ``FlatFileItemWriter`` provided by {SB} gets the previous output position from the context and outputs from that position at the time of restart, so no special countermeasure is necessary. +
+  For transactional resources, since rollback is performed at the time of failure, it is possible to perform processing without taking any special action at restart.
+
+If the above conditions are satisfied, add the option ``-restart`` to the failed job and execute it again.
+Below an example of job restart is shown.
+
+[source,console]
+.Restart example of synchronous job
+----
+# (1)
+java -cp dependency/* org.springframework.batch.core.launch.support.CommandLineJobRunner <jobPath> <jobName> -restart
+----
+
+[cols="10,90"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|At ``CommandLineJobRunner``specify the failed job's job bean path and job name, add ``-restart``and execute it +
+Since job parameters are restored from ``JobRepository``, it is not necessary to specify them.
+
+|===
+
+An example of restarting a job executed in asynchronous execution (DB polling) is shown below.
+
+[source,console]
+.Restart example of job executed in asynchronous execution (DB polling)
+----
+# (1)
+java -cp dependency/* org.springframework.batch.core.launch.support.CommandLineJobRunner <JobExecutionId> -restart
+----
+
+[cols="10,90"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Run ``CommandLineJobRunner``by specifying the same job execution ID (JobExecutionId) as the failed job and adding ``-restart``. +
+Since job parameters are restored from ``JobRepository``, it is not necessary to specify them.
+
+The job execution ID can be acquired from the job-request-table.
+About the job-request-table, please refer <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB_Arch_RequireTable,"About polling table">>.
+|===
+
+[TIP]
+.Output log of job execution ID
+====
+In order to promptly specify the job execution ID of the abnormally terminated job,
+It is recommended to implement a listener or exception handling class that logs the job execution ID when the job ends or when an exception occurs.
+====
+
+An example of restart in asynchronous execution (Web container) is shown below.
+
+[source,java]
+.Examples of restarting jobs executed in asynchronous execution (web container)
+----
+public long restart(long JobExecutionId) throws Execption {
+  return jobOperator.restart(JobExecutionId); // (1)
+}
+
+----
+
+[cols="10,90"]
+.Description
+|===
+|Sr.No.
+|Description
+
+|(1)
+|Specify the same job execution ID (JobExecutionId) as the failed job to ``JobOperator`` and execute it with ``restart`` method. +
+Job parameters are restored from ``JobRepository``.
+
+The job execution ID can be obtained from the ID acquired when executing the job with the web application or from ``JobRepository``.
+For acquisition method, please refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement,"Job status management">>.
+|===
+
+[[Ch06_RerunRestart_HowToUse_Restart_Statefull]]
+=== Stateful restart
+How to achieve stateful restart is explained.
+
+Stateful restart is a method of reprocessing by acquiring only unprocessed data together with input/output results at the time of execution.
+Although this method is difficult to design such as state retaining / determination unprocessed etc, it is sometimes used because it has a strong characteristic in data change.
+
+In stateful restart, since restart conditions are determined from input / output resources, persistence of ``JobRepository`` becomes unnecessary.
+
+Input at restart::
+  Prepare an ItemReader that implements logic that acquires only unprocessed data with input / output results.
+
+Output at restart::
+  Similar to <<Ch06_RerunRestart_HowToUse_Restart_Stateless>> caution is required for output to non-transactional resource. +
+  In the case of a file, assuming that the context is not used, it is necessary to design such that file addition is permitted.
+
+Stateful restart,similar to <<Ch06_RerunRestart_HowToUse_Rerun>> reruns the job with the same condition as with the failed job. +
+Unlike stateless restart, ``-restart`` option is not used.
+
+An example of implementing an easy stateful restart is shown below.
+
+.Processing specification
+. Define a processed column in the input target table, and update it with a value other than NULL if the processing succeeds.
+** For the extraction condition of unprocessed data, the value of the processed column is NULL.
+. Output the processing result to a file.
+
+[source,xml]
+.RestartOnConditionRepository.xml
+----
+<!-- (1) -->
+<select id="findByProcessedIsNull"
+        resultType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail">
+    <![CDATA[
+    SELECT
+        branch_id AS branchId, year, month, customer_id AS customerId, amount
+    FROM
+        sales_plan_detail
+    WHERE
+        processed IS NULL
+    ORDER BY
+        branch_id ASC, year ASC, month ASC, customer_id ASC
+    ]]>
+</select>
+
+<!-- (2) -->
+<update id="update" parameterType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail">
+    <![CDATA[
+    UPDATE
+        sales_plan_detail
+    SET
+        processed = '1'
+    WHERE
+        branch_id = #{branchId}
+    AND
+        year = #{year}
+    AND
+        month = #{month}
+    AND
+        customer_id = #{customerId}
+    ]]>
+</update>
+
+----
+
+[source, xml]
+.restartOnConditionBasisJob.xml
+----
+<!-- (3) -->
+<bean id="reader" class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+      p:queryId="org.terasoluna.batch.functionaltest.ch06.reprocessing.repository.RestartOnConditionRepository.findByZeroOrLessAmount"
+      p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+<!-- (4) -->
+<bean id="dbWriter" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+      p:statementId="org.terasoluna.batch.functionaltest.ch06.reprocessing.repository.RestartOnConditionRepository.update"
+      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+<bean id="fileWriter"
+      class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+      p:resource="file:#{jobParameters['outputFile']}"
+      p:appendAllowed="true"> <!-- (5) -->
+    <property name="lineAggregator">
+        <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator">
+            <property name="fieldExtractor">
+                <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+                      p:names="branchId,year,month,customerId,amount"/>
+            </property>
+        </bean>
+    </property>
+</bean>
+<!-- (6) -->
+<bean id="compositeWriter" class="org.springframework.batch.item.support.CompositeItemWriter">
+    <property name="delegates">
+        <list>
+            <ref bean="fileWriter"/>
+            <ref bean="dbWriter"/>
+        </list>
+    </property>
+</bean>
+
+<batch:job id="restartOnConditionBasisJob"
+           job-repository="jobRepository" restartable="false"> <!-- (7) -->
+
+    <batch:step id="restartOnConditionBasisJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader" processor="amountUpdateItemProcessor"
+                         writer="compositeWriter" commit-interval="10" />
+        </batch:tasklet>
+    </batch:step>
+
+</batch:job>
+----
+
+[source,console]
+.Example of restart command execution
+----
+# (8)
+java -cp dependency/* org.springframework.batch.core.launch.support.CommandLineJobRunner <jobPath> <jobName> <jobParameters> ...
+----
+
+[cols="10,90", options="header"]
+.Description
+|====
+|Sr.No.
+|Description
+
+|(1)
+|Define SQL so that the processed column has only NULL data.
+
+|(2)
+|Define SQL to update processed columns with non-NULL
+
+|(3)
+|For ItemReader, set the SQLID defined in (1).
+
+|(4)
+|For updating to the database, set the SQLID defined in (2).
+
+|(5)
+|At restart,allow addition of files in order to make it possible to write from the last interruption point.
+
+|(6)
+|Set ``CompositeItemWriter`` to be processed in the order of file output -> database update, and set it to chunk writer.
+
+|(7)
+|It is not mandatory, but set the ``restartable`` attribute to false so that it will get an error if it is started accidentally with the ``-restart`` option.
+
+|(8)
+|Execute again according to the execution condition of the failed job.
+
+|====
+
+[IMPORTANT]
+.About the job's restartable attribute
+====
+If ``restartable``is true, as explained in <<Ch06_RerunRestart_HowToUse_Restart_Stateless>>, use the context information to skip input / output data.
+If you are using ItemReader or ItemWriter provided by {SB} in stateful restart, there is a possibility that this process may stop processing as expected.
+Therefore, by setting ``restartable`` to false, activation with the ``-restart`` option will result in an error, preventing malfunction.
+====

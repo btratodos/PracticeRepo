@@ -1,0 +1,526 @@
+include::_include_all.adoc[]
+
+[[Ch03_CreateTaskletJob]]
+= Creation of tasklet model job
+
+[[Ch03_CreateTaskletJob_Overview]]
+== Overview
+
+How to create tasklet model job is explained.
+Refer to <<Ch02_SpringBatchArchitecture.adoc#,{SB} architecture>> for the architecture of tasklet model.
+
+[[Ch03_CreateTaskletJob_Overview_Components]]
+=== Components
+
+Tasklet model job does not register multiple components.
+It only implements ``org.springframework.batch.core.step.tasklet.Tasklet`` and sets it in Bean definition.
+`` ItemReader`` and `` ItemWriter`` which are components of the chunk model can also be used as components as the advanced implementation means.
+
+[[Ch03_CreateTaskletJob_HowToUse]]
+== HowToUse
+
+How to implement tasklet model job is explained in the following order here.
+
+* <<Ch03_CreateTaskletJob_HowToUse_JobConfig>>
+* <<Ch03_CreateTaskletJob_HowToUse_Implements>>
+
+[[Ch03_CreateTaskletJob_HowToUse_JobConfig]]
+=== Job configuration
+
+Define tasklet model job in Bean definition file.
+An example is shown below.
+
+[source,xml]
+.Example of Bean definition file (Tasklet model)
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <!-- (1) -->
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <!-- (2) -->
+    <context:annotation-config/>
+
+    <!-- (3) -->
+    <context:component-scan
+          base-package="org.terasoluna.batch.functionaltest.app.common"/>
+
+    <!-- (4) -->
+    <batch:job id="simpleJob" job-repository="jobRepository"> <!-- (5) -->
+        <batch:step id="simpleJob.step01"> <!-- (6) -->
+            <batch:tasklet transaction-manager="jobTransactionManager"
+                           ref="simpleJobTasklet"/> <!-- (7) -->
+        </batch:step>
+    </batch:job>
+
+</beans>
+----
+
+[source,java]
+.Example of tasklet implementation class
+----
+package org.terasoluna.batch.functionaltest.app.common;
+
+@Component // (3)
+public class SimpleJobTasklet implements Tasklet {
+  // omitted.
+}
+----
+
+[cols="10,90", options="header"]
+|===
+|S. No.
+|Explanation
+
+|(1)
+|Import the settings to always read the required Bean definition when using {batch5_shortname}.
+
+|(2)
+|Enable Bean definition using annotation. Use it with (3).
+
+|(3)
+|Set base package of component-scan target. Use it with (2). +
+In the tasklet model, Bean is defined by annotation however, Bean definition of tasklet implementation class is not required in XML.
+
+|(4)
+|Job configuration. +
+``id`` attribute must be unique for all the jobs included in 1 batch application.
+
+|(5)
+|``JobRepository`` configuration. +
+The value set in the `` job-repository`` attribute should be fixed to `` jobRepository`` unless there is a special reason. +
+This will allow all the jobs to be managed in one ``JobRepository``.
+Resolve Bean definition of ``jobRepository`` by (1).
+
+|(6)
+|Step configuration. +
+Although it is not necessary to use a unique ``id`` attribute for all the jobs in 1 batch application, a unique id is used for enabling easy tracking at the time of failure occurrence. +
+A format of [step+serial number] is used for id attribute specified in (4) unless for a specific reason to use a different format.
+
+|(7)
+|Tasklet configuration. +
+The value set in the ``transaction-manager`` attribute should be fixed to ``jobTransactionManager`` unless there is a special reason. +
+This will manage the processes of the entire tasklet in one transaction.
+For details, refer to <<Ch05_Transaction.adoc#,Transaction control>>. +
+Resolve Bean definition of ``jobTransactionManager`` by (1). +
+
+Also, ``ref`` attribute specifies a Bean ID of Tasklet implementation class to be resolved by (3). +
+``SimpleJobTasklet``, the tasklet implementation class name should be ``simpleJobTasklet`` with the first letter in lower case.
+
+|===
+
+[TIP]
+.Bean name when using annotation
+====
+Bean name when using ``@Component`` annotation is generated through
+``org.springframework.context.annotation.AnnotationBeanNameGenerator``.
+Refer to Javadoc of this class when you want to confirm the naming rules.
+====
+
+[[Ch03_CreateTaskletJob_HowToUse_Implements]]
+=== Implementation of tasklet
+
+First, understand the overview with simple implementation, then proceed to implementation using the components of the chunk model.
+
+It is explained in the following order.
+
+* <<Ch03_CreateTaskletJob_HowToUse_Implements_Simple>>
+* <<Ch03_CreateTaskletJob_HowToUse_Implements_InOut>>
+
+[[Ch03_CreateTaskletJob_HowToUse_Implements_Simple]]
+=== Implementation of simple tasklet
+
+Basic points are explained through tasklet implementation only for log output.
+
+[source,java]
+.Example of simple tasklet implementation class
+----
+package org.terasoluna.batch.functionaltest.app.common;
+
+// omitted.
+
+@Component
+public class SimpleJobTasklet implements Tasklet { // (1)
+
+    private static final Logger logger =
+            LoggerFactory.getLogger(SimpleJobTasklet.class);
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {  // (2)
+        logger.info("called tasklet."); // (3)
+        return RepeatStatus.FINISHED; // (4)
+    }
+}
+----
+
+[cols="10,90", options="header"]
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Implement ``org.springframework.batch.core.step.tasklet.Tasklet`` interface using ``implements``.
+
+|(2)
+|Implement ``execute`` method to be defined by ``Tasklet`` interface.
+Arguments ``StepContribution``, ``ChunkContext`` are used however, they are not explained here.
+
+|(3)
+|Implement any process. INFO log is output here.
+
+|(4)
+|Return whether or not the tasklet process is completed. +
+Always specify as ``return RepeatStatus.FINISHED;``.
+
+|===
+
+[[Ch03_CreateTaskletJob_HowToUse_Implements_InOut]]
+=== Implementation of tasklet using the components of chunk model
+
+{SB} does not mention using various components of chunk model during tasklet implementation.
+In {batch5_shortname}, you may select this depending on the following situations.
+
+* When multiple resources are combined and processed, it is difficult to be as per the chunk model format
+* When processes are implemented at various places in the chunk model, tasklet model is better to understand the overall image easily
+* When recovery is made simple and you want to use batch commit of tasklet model instead of intermediate commit of chunk model
+
+Note that, processing units should also be considered to implement Tasklet by using components of chunk model.
+Following 3 patterns can be considered as units of output records.
+
+[cols="15,85", options="header"]
+.Units and features of output records
+|===
+|Output records
+|Features
+
+|1 record
+| Since data is input, processed and output one by one for each record, processing images is easy. +
+It must be noted that performance deterioration is likely to occur due to frequent I/O in case of large amount of data.
+
+|All records
+|Data is input and processed one by one for each record and stored in the memory, all records are output together in the end. +
+Data consistency can be ensured and performance can be improved in case of small amount of data.
+However, it must be noted that high load is likely to be applied on resources (CPU, memory) in case of large amount of data.
+
+|Fixed records
+|Data is input and processed one by one for each record and stored in the memory, data is output when a certain number of records are reached. +
+Performance improvement is anticipated by efficiently processing large amount of data with certain resources (CPU, memory). +
+Also, since the data is processed for a fixed number of records, intermediate commit can also be employed by implementing transaction control.
+However, it must be noted that, processed and unprocessed data are likely to exist together in the recovery if the job has terminated abnormally, in case of intermediate commit method.
+
+|===
+
+The tasklet implementation that uses `` ItemReader`` and `` ItemWriter`` which are the components of the chunk model is explained below.
+
+The implementation example shows processing data one by one for each record.
+
+[source,java]
+.Tasklet implementation example that uses the components of chunk model
+----
+@Component()
+@Scope("step") // (1)
+public class SalesPlanChunkTranTask implements Tasklet {
+
+    @Inject
+    @Named("detailCSVReader") // (2)
+    ItemStreamReader<SalesPlanDetail> itemReader; // (3)
+
+    @Inject
+    SalesPlanDetailRepository repository; // (4)
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        SalesPlanDetail item;
+
+        try {
+            itemReader.open(chunkContext.getStepContext().getStepExecution()
+                    .getExecutionContext()); // (5)
+
+            while ((item = itemReader.read()) != null) { // (6)
+
+                // do some processes.
+
+                repository.create(item); // (7)
+            }
+        } finally {
+            itemReader.close(); // (8)
+        }
+        return RepeatStatus.FINISHED;
+    }
+}
+
+----
+
+[source,xml]
+.Bean definition example 1
+----
+<!-- omitted -->
+<import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+<context:annotation-config/>
+
+<context:component-scan
+    base-package="org.terasoluna.batch.functionaltest.app.plan" />
+<context:component-scan
+    base-package="org.terasoluna.batch.functionaltest.ch05.transaction.component" />
+
+<!-- (9) -->
+<mybatis:scan
+    base-package="org.terasoluna.batch.functionaltest.app.repository.plan"
+    factory-ref="jobSqlSessionFactory"/>
+
+<!-- (10) -->
+<bean id="detailCSVReader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+      p:resource="file:#{jobParameters['inputFile']}">
+    <property name="lineMapper">
+        <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+            <property name="lineTokenizer">
+                <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                      p:names="branchId,year,month,customerId,amount"/>
+            </property>
+            <property name="fieldSetMapper">
+                <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                      p:targetType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail"/>
+            </property>
+        </bean>
+    </property>
+</bean>
+
+<!-- (11) -->
+<batch:job id="createSalesPlanChunkTranTask" job-repository="jobRepository">
+    <batch:step id="createSalesPlanChunkTranTask.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager"
+                       ref="salesPlanChunkTranTask"/>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set the same step scope as the Bean scope of ItemReader to be used in this class.
+
+|(2)
+|Access input resources (flat files in this example) through ``ItemReader``. +
+Specify Bean name as ``detailCSVReader`` but it is optional for clarity purpose.
+
+|(3)
+|Define the type as ``ItemStreamReader`` that is sub-interface of ``ItemReader``. +
+This is because it is necessary to open/close the resource of (5), (8).
+It is supplemented later.
+
+|(4)
+|Access output resources (database in this example) through Mapper of MyBatis. +
+Mapper is directly used for the sake of simplicity. There is no need to always use ``ItemWriter``.
+Of course, ``MyBatisBatchItemWriter`` can be used.
+
+|(5)
+|Open input resource.
+
+|(6)
+|Loop all input resources sequentially. +
+``ItemReader#read`` returns ``null`` when it reads all the input data and reaches the end.
+
+|(7)
+|Output to database.
+
+|(8)
+|Resource should be closed without fail. +
+Exception handling should be implemented.
+When an exception occurs, the transactions of the entire tasklet are rolled-backed,
+stack trace of exception is output and the job terminates abnormally.
+
+|(9)
+|MyBatis-Spring settings. +
+For details of MyBatis-Spring settings, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess, Database access>>.
+
+
+|(10)
+|To enter from file, add Bean definition of ``FlatFileItemReader``. The details are not explained here.
+
+|(11)
+|Since all the components are resolved by annotation, +
+it is same as <<Ch03_CreateTaskletJob_HowToUse_Implements_Simple>>.
+
+|===
+
+[IMPORTANT]
+.On unification of scope
+====
+The scope of tasklet implementation class and Bean to be Injected should have the same scope.
+
+For example,  if `` FlatFileItemReader`` receives an input file path from an argument, the Bean scope should be `` step``.
+In this case, the scope of tasklet implementation class should also be ``step``.
+
+If the scope of tasklet implementation class is set to ``singleton`` temporarily,
+after instantiating the tasklet implementation class at the time of generating ``ApplicationContext`` at application startup
+if it tries to Inject by resolving the instance of ``FlatFileItemReader``,
+``FlatFileItemReader`` will be in the ``step`` scope, however will not exist yet. because it is to be generated at the time of step execution.
+As the result, the tasklet implementation class cannot be instantiated and fails to generate `` ApplicationContext``.
+====
+
+
+[IMPORTANT]
+.Regarding the type of field assigned with @Inject
+====
+Any one of the following type depending on the implementation class to be used.
+
+* ItemReader/ItemWriter
+** Used when there is no need to open/close the target resource.
+* ItemSteamReader/ItemStreamWriter
+** Used when there is a need to open/close the target resource.
+
+It should be decided which type to use after confirming javadoc. Typical examples are shown below.
+
+In case of FlatFileItemReader/Writer::
+  handle by ItemSteamReader/ItemStreamWriter
+In case of MyBatisCursorItemReader::
+  handle by ItemStreamReader
+In case of MyBatisBatchItemWriter::
+  handle by ItemWriter
+====
+
+The implementation example imitates a chunk model to process a certain number of records
+
+[source,java]
+.Tasklet implementation example 2 that uses the components of chunk model
+----
+@Component
+@Scope("step")
+public class SalesPerformanceTasklet implements Tasklet {
+
+
+    @Inject
+    ItemStreamReader<SalesPerformanceDetail> reader;
+
+    @Inject
+    ItemWriter<SalesPerformanceDetail> writer; // (1)
+
+    int chunkSize = 10; // (2)
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution()
+                    .getExecutionContext());
+
+            List<SalesPerformanceDetail> items = new ArrayList<>(chunkSize); // (2)
+            SalesPerformanceDetail item = null;
+            do {
+                // Pseudo operation of ItemReader
+                for (int i = 0; i < chunkSize; i++) { // (3)
+                    item = reader.read();
+                    if (item == null) {
+                        break;
+                    }
+                    // Pseudo operation of ItemProcessor
+                    // do some processes.
+
+                    items.add(item);
+                }
+
+                // Pseudo operation of ItemWriter
+                if (!items.isEmpty()) {
+                    writer.write(items); // (4)
+                    items.clear();
+                }
+            } while (item != null);
+        } finally {
+            try {
+                reader.close();
+            } catch (Exception e) {
+                // do nothing.
+            }
+        }
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[source,xml]
+.Bean definition example 2
+----
+<!-- omitted -->
+<import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+<context:annotation-config/>
+<context:component-scan
+    base-package="org.terasoluna.batch.functionaltest.app.common,
+        org.terasoluna.batch.functionaltest.app.performance,
+        org.terasoluna.batch.functionaltest.ch06.exceptionhandling"/>
+<mybatis:scan
+    base-package="org.terasoluna.batch.functionaltest.app.repository.performance"
+    factory-ref="jobSqlSessionFactory"/>
+
+<bean id="detailCSVReader"
+      class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+      p:resource="file:#{jobParameters['inputFile']}">
+    <property name="lineMapper">
+        <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+            <property name="lineTokenizer">
+                <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                      p:names="branchId,year,month,customerId,amount"/>
+            </property>
+            <property name="fieldSetMapper">
+                <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                      p:targetType="org.terasoluna.batch.functionaltest.app.model.performance.SalesPerformanceDetail"/>
+            </property>
+        </bean>
+    </property>
+</bean>
+
+<!-- (1) -->
+<bean id="detailWriter"
+      class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+      p:statementId="org.terasoluna.batch.functionaltest.app.repository.performance.SalesPerformanceDetailRepository.create"
+      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+
+<batch:job id="jobSalesPerfTasklet" job-repository="jobRepository">
+    <batch:step id="jobSalesPerfTasklet.step01">
+        <batch:tasklet ref="salesPerformanceTasklet"
+                       transaction-manager="jobTransactionManager"/>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Use ``MyBatisBatchItemWriter`` as the implementation of ``ItemWriter``.
+
+|(2)
+|``ItemWriter`` outputs a fixed number of records collectively. +
+It processes and output 10 records each.
+
+|(3)
+|As per the behavior of chunk model, +
+it should be read->process->read->process->...->write.
+
+|(4)
+|Output through ``ItemWriter`` collectively.
+|===
+
+Decide each time whether to use the implementation class of ``ItemReader`` or ``ItemWriter``.
+For file access, the implementation class of ``ItemReader`` and ``ItemWriter`` can be used.
+For other than this such as database access, there is no need to use compulsorily. It can be used to improve performance.

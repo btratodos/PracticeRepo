@@ -1,0 +1,6 @@
+// adoc to describe items to be set only on the index page
+
+:doctitle: {doctitle-index}
+:author: {author-index}
+:revdate: {revdate-index}
+:revnumber: {revnumber-index}

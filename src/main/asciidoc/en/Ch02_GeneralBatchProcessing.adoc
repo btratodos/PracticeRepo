@@ -1,0 +1,116 @@
+include::_include_all.adoc[]
+
+[[Ch02_GeneralBatchProcess]]
+= Batch Processing in General
+
+[[Ch02_GeneralBatchProcess_AboutBatchProcess]]
+== Introduction to Batch Processing
+
+The term of "Batch Processing" refers to the execution or process of a series of jobs in a computer program without manual intervention (non-interactive). +
+It is often a process of reading, processing and writing a large number of records from a database or a file. +
+Batch processing consists of following features and is a processing method which prioritizes process throughput than the responsiveness, as compared to online processing.
+
+.Commons of batch processing
+* Process large number of data is collected and processed.
+* Uninterruptible process for certainty of time is done in a fixed sequence.
+* Process runs in accordance with the schedule.
+
+Objective of batch processing is given below.
+
+Enhanced throughput::
+  Process throughput can be enhanced by processing the data sets collectively in a batch. +
+  File or database does not input or output data one by one, and instead sums up data of a fixed quantity thus dramatically reducing overheads of waiting for I/O resulting in the increased efficiency.
+  Even though waiting period for I/O of a single record is insignificant, cumulative accumulation while processing a large amount of data result in fatal delay.
+Ensuring responsiveness::
+  Processes which are not required to be processed immediately are cut for batch processing in order to ensure responsiveness of online processing. +
+  For example, when the process results are not required immediately, the processing is done by online processing till its acceptance and batch processing is performed in the background.
+  The processing method is generally called "delayed processing".
+Response to time and events::
+  Processes corresponding to specific period and events are naturally implemented by batch processing. +
+  For example, aggregating business data sets per month on the next 1st weekend, +
+  taking backup every Sunday at 2a.m in accordance with the system operation rules, +
+  and so on.
+Restriction for coordination with external system::
+  Batch processing is also used due to restrictions of interface like files with interactions of external systems. +
+  File sent from the external system is a summary of data collected for a certain period.
+  Batch processing is better suited for the processes which incorporate these files, than the online processing.
+
+It is very common to combine various techniques to achieve batch processing. Major techniques are introduced here.
+
+Job Scheduler::
+  A single execution unit of a batch processing is called a job. A job scheduler is a middleware to manage this job. +
+  A batch system rarely has several jobs, and usually the number of jobs can reach hundreds or even thousands at times.
+  Hence, an exclusive system to define the relation with the job and manage execution schedule becomes indispensable.
+Shell script::
+  One of the methods to implement a job. A process is achieved by combining the commands implemented in OS and middleware. +
+  Although the method can be implemented easily, it is not suitable for writing complex business logic. Hence, it is primarily used in simple processes like copying a file, backup, clearing a table etc.
+  Further, shell script performs only the pre-start settings and post-execution processing while executing a process implemented in another programming language.
+Programming language::
+  One of the methods to implement a job. Structured code can be written rather than the shell script and is advantageous for securing development productivity, maintainability and quality.
+  Hence, it is commonly used to implement business logic that processes data of file or database which tend to be relatively complex with logic.
+
+[[Ch02_GeneralBatchProcess_Scenario]]
+== Requirements for batch processing
+Requirements for batch processing in order to implement business process is as given below.
+
+* Performance improvement
+** A certain quantity of data can be processed in a batch.
+** Jobs can be executed in parallel/in multiple.
+
+* Recovery in case of an abnormality
+** Jobs can be reexecuted (manual/schedule).
+** At the time of reprocessing, it is possible to process only unprocessed records by skipping processed records.
+
+* Various activation methods for running jobs
+** Synchronous execution possible.
+** Asynchronous execution possible.
+*** DB polling, HTTP requests can be used as opportunities for execution.
+
+* Various input and output interfaces
+** Database
+** File
+*** Variable length like CSV or TSV
+*** Fixed length
+*** XML
+
+
+Specific details for the above requirements are given below.
+
+A large amount of data can be efficiently processed using certain resources (Performance improvement)::
+  Processing time is reduced by processing the data collectively. Important part here is **"Certain resources"** part. +
+  Processing can be done by using a CPU and memory for 100 or even 1 million records and the processing time is ideally extended slowly and linearly according to number of records.
+  Transaction is started and terminated for certain number of records to perform a process collectively. Resources to be  used must be levelled in order to perform I/O collectively. +
+  Still, when a large amount of data is to be handled which is yet to be processed, a system wherein hardware resources are used till the limit going a step further.
+  Data to be processed is divided into records or groups and multiple processing is done by using multiple processes and multiple threads.
+  Moving ahead, distributed processing using multiple machines is also implemented.
+  When resources are used upto the limit, it becomes extremely important to reduce as much as possible.
+
+Continue the processing as much as possible (Recovery at the time of occurrence of abnormality)::
+  When a large amount of data is to be processed, the countermeasures when an abnormality occurs in input data or system itself must be considered. +
+  A large amount of data takes a long time to finish processing, however if the time till recovery after occurrence of error is prolonged, it is likely to affect the system a great deal. +
+  For example, consider a data consisting of 1 billion records to be processed. Operation schedule would be obviously affected a great deal if error is detected in 999 millionth record and the processing so far is to be performed all over again. +
+  To control this impact, process continuity unique to batch processing becomes very important Hence a system wherein error data skipped and next data record is processed, a system to restart the process and a system which attempts
+  auto-recovery become necessary. Further, it is important to simplify a job as much as possible and enable its easy execution later.
+
+Can be executed flexibly according to triggers of execution (various activation methods)::
+  A system to respond to various execution triggers is necessary when triggered by time, or by connecting online or connecting with external system.
+  various systems are widely known such as synchronous processing wherein processing starts when job scheduler reaches
+  scheduled time, asynchronous processing wherein the process is kept resident and batch processing
+  is performed as per the events.
+
+Handles various input and output interfaces (Various input output interfaces)::
+  It is important to handle various files like CSV/XML as well as databases for linking online and external systems.
+  Further, if a method which transparently handles respective input and output method exists, implementation becomes easier and to deal with various formats becomes more quickly.
+
+[[Ch02_GeneralBatchProcess_Considerations]]
+== Rules and precautions to be considered in batch processing
+Important rules while building a batch processing system and a few considerations are shown.
+
+* Simplify unit batch processing as much as possible and avoid complex logical structures.
+* Keep process and data in physical proximity (Save data at the location where process is executed).
+* Minimise the use of system resources (especially I/O) and execute operations in in-memory as much as possible.
+* Further, review I/O of application (SQL etc) to avoid unnecessary physical I/O.
+* Do not repeat the same process for multiple jobs.
+** For example, in case of counting and reporting process, avoid repetition of counting process during reporting process.
+* Always assume the worst situation related to data consistency. Verify data to check and to maintain consistency.
+* Review backups carefully. Difficulty level of backup will be high especially when system is operational seven days a week.

@@ -1,0 +1,223 @@
+include::_include_all.adoc[]
+
+[[Ch01_ChangeLog]]
+= 更新履歴
+
+[cols="15,25,60", options="header"]
+|===
+|更新日付
+|更新箇所
+|変更内容
+
+|2018-3-16
+|-
+|5.1.1 RELEASE 版公開
+
+|
+|全般
+|記載内容の修正 +
+・{batch5_fullname}のバージョン表記を{batch5_version}に変更 (管理ID#374) +
+・ガイドラインの誤記(タイプミスや単純な記述ミスなど)や表記揺れの修正 +
+・リンク切れやセクション変更に伴うリンクの修正
+
+記載内容の削除 +
+・Bean定義ファイルについて、<context:annotation-config/>は<context:component-scan>の役割と重複するため、実装例から削除 (管理ID#398)
+
+|
+|<<Ch02_TerasolunaBatchStack.adoc#Ch02_TerasolunaBatchStack,{batch5_fullname}のスタック>>
+|記載内容の修正 +
+・Spring IO platformのバージョンアップに伴い、利用するOSSのバージョンを変更 (管理ID#375) +
+・脆弱性対応のため、Spring Frameworkのバージョンを更新 (管理ID#494)
+
+|
+|<<Ch03_CreateProject.adoc#Ch03_CreateProject,バッチアプリケーションの開発>>
+|記載内容の削除 +
+・「プロジェクト作成後の注意事項について」の注釈を削除 (管理ID#373)
+
+|
+|<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,非同期実行(DBポーリング)>>
+|記載内容の修正 +
+・非同期バッチデーモンの停止ファイルのファイル名を変更 (管理ID#379)
+
+記載内容の追加 +
+・タイムスタンプに用いるクロックのカスタマイズに関する説明を追加 (管理ID#381)
+
+|
+|<<Ch04_Listener.adoc#Ch04_Listener,リスナー>>
+|記載内容の追加 +
+・ジョブの前処理で、ジョブの中断を行う場合の説明を追加 (管理ID#402) +
+・Listenerで例外が発生した場合の留意点について説明を追加 (管理ID#403)
+
+|
+|<<Ch05_DBAccess.adoc#Ch05_DBAccess,データベースアクセス>>
+|記載内容の修正 +
+・サンプルソースでの現在時刻の取得方法をSystemクラスからClockクラスを利用する方法に変更 (管理ID#381) +
+・セクションの分け方を入力/出力を軸にするように変更 (管理ID#167) +
+・セクションの変更に伴い、リンクを修正 (管理ID#167)
+
+記載内容の追加 +
+・ItemReaderを利用してデータベース検索する際にパラメータとして渡す方法について説明を追加 (管理ID#267) +
+・MyBatisCursorItemReaderにおけるクローズ時の注意事項について注釈を追加 (管理ID#370)
+
+|
+|<<Ch05_FileAccess.adoc#Ch05_FileAccess,ファイルアクセス>>
+|記載内容の修正 +
+・「全角文字をフォーマットするFieldExtractorの実装例」で文字列の結合にStringBuilderを使用するよう改善 (管理ID#228)
+
+|
+|<<Ch05_ExclusiveControl.adoc#Ch05_ExclusiveControl,排他制御>>
+|記載内容の修正 +
+・サンプルソースでの現在時刻の取得方法をSystemクラスからClockクラスを利用する方法に変更 (管理ID#381)
+
+|
+|<<Ch06_InputValidation.adoc#Ch06_InputValidation,入力チェック>>
+|記載内容の追加 +
+・エラーメッセージの出力方法について説明を追加 (管理ID#326)
+
+|
+|<<Ch08_ParallelAndMultiple.adoc#Ch08_ParallelAndMultiple,並列処理と多重処理>>
+|記載内容の修正 +
+・分割数が固定の場合のBean定義のコード例について、readerに渡すパラメータの型指定をvalue-typeで指定するように修正 (管理ID#267)
+
+|
+|<<Ch09_TutorialApplication.adoc#Ch09_TutorialApplication,作成するアプリケーションの説明>>
+|記載内容の修正 +
+・チュートリアルで作成するジョブと開発ガイドラインの説明の対応表で、データベースアクセス機能へのリンクを修正 (管理ID#167)
+
+|
+|<<Ch09_AsyncExecutionJob.adoc#Ch09_Impl_AsyncExecutionJob,非同期実行方式のジョブ>>
+|記載内容の修正 +
+・非同期バッチデーモンの停止ファイルのファイル名を変更 (管理ID#379)
+
+|2017-09-27
+|-
+|5.0.1 RELEASE 版公開
+
+|
+|全般
+|記載内容の修正 +
+・ガイドラインの誤記(タイプミスや単純な記述ミスなど)の修正 +
+・ヘッダとフッタの目次へのリンクのデザインを修正 (管理ID#196) +
+・JDK8未習得者が利用することも考慮してJDK8依存のコードをJDK7以前のコードへ変更 (管理ID#231)
+
+記載内容の追加 +
+・ヘッダとフッタにバージョン情報を追加 (管理ID#196)
+
+|
+|<<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch,{SB}のアーキテクチャ>>
+|記載内容の追加 +
+・メタデータテーブルへ格納する文字列についての説明を追加 (管理ID#233) +
+
+記載内容の削除 +
+・ジョブパラメータの制約についての説明を削除 (管理ID#233)
+
+|
+|<<Ch03_CreateProject.adoc#Ch03_CreateProject,プロジェクトの作成>>
+|記載内容の修正 +
+・ブランクプロジェクトのジョブBean定義ファイルの格納ディレクトリを変更 (管理ID#161) +
+・コマンドの実行例や出力例についてはコマンドプロンプトとBashそれぞれの例を示すように修正 (管理ID#161) +
+・プロジェクトを作成する際に指定するarchetypeVersionを5.0.1.RELEASEに修正 (管理ID#315)
+
+|
+|<<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob,チャンクモデルジョブの作成>>
+|記載内容の修正 +
+・Bean定義ファイルのid属性の説明を平易な表現に修正 (管理ID#250)
+
+|
+|<<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob,タスクレットモデルジョブの作成>>
+|記載内容の修正 +
+・Bean定義ファイルのid属性の説明を平易な表現に修正 (管理ID#250)
+
+記載内容の追加 +
+・Tasklet実装する際に考慮する処理単位の説明を追加 (管理ID#202)
+
+|
+|<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB_Overview,非同期実行(DBポーリング)>>
+|記載内容の修正 +
+・クラス名の接尾辞をRepositoryに修正 (管理ID#241) +
+・ジョブ要求シーケンスに関する説明を特定のRDBMS製品に依存しない内容に修正 (管理ID#233)
+
+記載内容の追加 +
+・ジョブ要求テーブルへ格納する文字列についての説明を追加 (管理ID#233) +
+・ジョブ要求取得SQLの説明を追加 (管理ID#233)
+
+|
+|<<Ch04_JobParameter.adoc#Ch04_JobParameter,ジョブの起動パラメータ>>
+|記載内容の修正 +
+・文字列リテラルはシングルクォートで囲むようにパラメータを参照する例を修正 (管理ID#246)
+
+|
+|<<Ch04_Listener.adoc#Ch04_Listener,リスナー>>
+|記載内容の修正 +
+・JobExecutionListenerの実装例をより平易なコード例を提示するように修正 (管理ID#271)
+
+記載内容の追加 +
+・ChunkListenerの説明に例外ハンドリングへのリンクを追加 (管理ID#194) +
+・リスナーを設定する位置の説明にタスクレットモデルの場合の注意点を追加 (管理ID#194)
+
+|
+|<<Ch05_Transaction.adoc#Ch05_Transaction,トランザクション制御>>
+|記載内容の修正 +
+・タスクレットモデルにおける中間コミット方式のコード例をjobResourcelessTransactionManagerを使用する例に修正 (管理ID#262)
+
+記載内容の追加 +
+・タスクレットモデルにおける中間コミット方式にjobResourcelessTransactionManagerの説明を追加 (管理ID#262)
+
+|
+|<<Ch05_DBAccess.adoc#Ch05_DBAccess,データベースアクセス>>
+|記載内容の追加 +
+・CompositeItemWriterによる複数テーブルの更新例を追加 (管理ID#226) +
+・Linux環境でのOracle JDBC利用時の留意事項を追加 (管理ID#237)
+
+|
+|<<Ch05_FileAccess.adoc#Ch05_FileAccess,ファイルアクセス>>
+|記載内容の修正 +
+・FlatFileItemWriter、StaxEventItemWriterのプロパティの説明を修正 (管理ID#198)
+
+記載内容の追加 +
+・FlatFileItemWriter、StaxEventItemWriterのプロパティ設定の組み合わせによって意図しないファイル削除が行われる説明を追加 (管理ID#198)
+
+|
+|<<Ch05_ExclusiveControl.adoc#Ch05_ExclusiveControl,排他制御>>
+|記載内容の修正 +
+・チャンクモデルでの悲観ロックのコード例を修正 (管理ID#204) +
+・ファイルの排他制御のコード例を排他対象ファイルをオープンする前にファイルロックを取得するように修正 (管理ID#225)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement,ジョブの管理>>
+|記載内容の削除 +
+・Spring Batch Adminプロジェクトの終了に伴いSpring Batch Adminに関する記述を削除 (管理ID#209)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_ExitCode,終了コードのカスタマイズ>>
+|記載内容の追加 +
+・終了コードのカスタマイズに終了コードの意味合いについての説明を追加 (管理ID#294) +
+・終了コードのカスタマイズにタスクレットモデルにおけるステップの終了コード変更のコード例を追加 (管理ID#294)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_MessageManagement,メッセージ管理>>
+|記載内容の修正 +
+・ResourceBundleMessageSourceのBean定義を修正 (管理ID#266)
+
+|
+
+ifeval::["{docname}" != "single_index"]
+
+|<<Ch09_index.adoc#Ch09,チュートリアル>>
+
+endif::[]
+
+ifeval::["{docname}" == "single_index"]
+
+|<<Ch09,チュートリアル>>
+
+endif::[]
+
+|章の新規追加 +
+・チュートリアルを追加 (管理ID#200)
+
+|2017-03-17
+|-
+|5.0.0 RELEASE 版公開
+
+|===

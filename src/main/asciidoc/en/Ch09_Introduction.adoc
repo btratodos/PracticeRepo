@@ -1,0 +1,118 @@
+include::_include_all.adoc[]
+
+[[Ch09_Introduction]]
+= Introduction
+
+[[Ch09_Introduction_Purpose]]
+== Objective of the tutorial
+This tutorial aims to achieve the basic knowledge of {batch5_shortname} by actually experiencing the development
+of the application based on the contents described in {batch5_guide}.
+
+[[Ch09_Introduction_Target]]
+== Target readers
+This tutorial is written for architects and programmers who are experienced in software development
+and it is assumed that readers possess the following knowledge.
+
+* Basic knowledge of DI or AOP of Spring Framework
+* Basic knowledge of SQL
+* Experience of developing a Java-based application
+
+[[Ch09_Introduction_Environment]]
+== Verification environment
+Verification of environment conditions for this tutorials are shown as below.
+
+[cols="20,80", options="header"]
+.Environment conditions
+|===
+|Software classification
+|Product name
+
+|OS
+|Windows 7 Professional SP1 (64bit)
+
+|JDK
+|openjdk-1.8.0.131.x86_64
+
+|IDE
+|Spring Tool Suite 3.8.2 released
+
+|Build Tool
+|Apache Maven 3.3.9
+
+|RDBMS
+|H2 Database 1.4.193
+
+|===
+
+[[Ch09_Introduction_AboutFrameWork]]
+== Overview of framework
+Overview of processing model and architecture differences are explained here as the overview of framework. +
+For {SB}, refer <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch, Architecture of {SB}>> of {batch5_guide} for details.
+
+Processing models offered by {batch5_shortname} include a chunk model and a tasklet model. +
+Respective features are explained below.
+
+Chunk model::
+A method which inputs/processes/outputs a certain number of data records together. This collection of data is called as a chunk.
+A job can be implemented by standardizing flow of processes like data input/processing/output and then implementing only a part of the process.
+It is used while processing a large amount of data effectively. +
+For details, refer <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch_Detail_BusinessLogic_Chunk, Chunk model>>.
+
+Tasklet model::
+A method which describes a process freely. It is used in simple cases like issuing SQL only once, issuing only command or in complex cases
+where it is difficult to standardize like accessing from multiple databases or files while processing. +
+For details, refer <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch_Detail_BusinessLogic_Tasklet, Tasklet model>>.
+
+For the processing model, the components and functional differences are shown in the table below.
+
+[cols="24,38,38", options="header"]
+.Functional differences of processing model
+|===
+|Function
+|Chunk model
+|Tasklet model
+
+|Components
+|It consists of ItemReader, ItemProcessor, ItemWriter and ChunkOrientedTasklet
+|It consists of Tasklet only.
+
+|Transaction
+|A transaction occurs for every chunk unit. Transaction control is only for the intermediate commit.
+|Process is done by 1 transaction. Either a batch commit method or intermediate commit method can be used for transaction control.
+Former method uses a transaction control system of {SB} whereas the transaction is done directly by the user in the later method.
+
+|Recommended reprocessing methods
+|Rerun and restart can be used.
+|Generally, only rerun is used.
+
+|Exception handling
+|Exception handling can be easily performed by using a listener. It can also be implemented individually by using try-catch.
+|Individual implementation by using try-catch is required.
+
+|===
+
+In this tutorial, how to implement a chunk model and a tasklet model is explained for the applications which use the basic functions.
+Since the implementation method varies according to architecture of chunk model and tasklet model,
+it is recommended to proceed further after completely understanding respective features of the model.
+
+[[Ch09_Introduction_HowToProceed]]
+== How to proceed with the tutorial
+Since the applications (jobs) created in this tutorial consists of jobs created
+by adding implementations to created jobs, the sequence in which they are created must be considered.
+
+How to read and proceed with this tutorial is shown in the figure below along with sequence relation of jobs to be created.
+
+.How to proceed with the tutorial
+image::ch09/Introduction/Ch09_Introduction_HowToProceed.png[How to Proceed with the Tutorial]
+
+.Execution timing for the asynchronous execution type job
+The asynchronous execution method job is assumed to be the last job in the order of the progress of this tutorial. 
+However, if at least one job is created in the chunk model or tasklet model, the asynchronous execution method job may be executed.
+
+[WARNING]
+.Additional implementation of jobs which inputs/outputs data by accessing a file
+====
+Implementation is added based on <<Ch09_DBAccessJob.adoc#Ch09_DBAccessJob, Job which inputs/outputs data by accessing database>>,
+besides explanation of <<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob, Job which inputs/outputs data by accessing the file>> and the execution example is displayed.
+When you want to add an implementation based on a job which inputs/outputs data by accessing a file, it must be remembered that it is necessary to read the same.
+====

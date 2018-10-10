@@ -1,0 +1,1350 @@
+include::_include_all.adoc[]
+
+[[Ch09_FileAccessJob]]
+= A job which inputs or outputs data by accessing a file
+
+[[Ch09_FileAccessJob_Overview]]
+== Overview
+Create a job which inputs or outputs data by accessing a file.
+
+Note that, since this chapter is explained based on {batch5_guide},
+refer <<Ch05_FileAccess.adoc#Ch05_FileAccess, File access>> for details.
+
+Background, process overview and business specifications of <<Ch09_TutorialApplication.adoc#Ch09_TutorialApplication, Explanation of application to be created>>
+are listed below.
+
+[[Ch09_FileAccessJob_Overview_Background]]
+=== Background
+Some mass retail stores issue point cards for members. +
+Membership types include "Gold member", "Normal member" and the services are provided based on membership type. +
+As a part of the service, 100 points are added for "gold members" and 10 points are added for "normal members" at the end of the month, 
+for the members who have purchased a product during that month.
+
+[[Ch09_FileAccessJob_Overview_ProcessOverview]]
+=== Process overview
+{batch5_shortname} will be using an application as a monthly batch process which
+adds points based on the membership type.
+
+[[Ch09_FileAccessJob_Overview_BusinessSpecification]]
+=== Business specifications
+Business specifications are as given below.
+
+* When the product purchasing flag is "1"(process target), points are added based on membership type
+** Add 100 points when membership type is "G"(gold member) and add 10 points when membership type is "N"(Normal member)
+* Product purchasing flag is updated to "0" (initial status) after adding points
+* Upper limit of points is 1,000,000 points
+* If the points exceed 1,000,000 points after adding points, they are adjusted to 1,000,000 points
+
+[[Ch09_FileAccessJob_Overview_FileSpecification]]
+=== File specifications
+Specifications of member information file which acts as an input and output resource are shown below.
+
+[cols="5,20,15,10,50", options="header"]
+.Member information file (Variable length CSV format)
+|===
+|No
+|Field name
+|Data type
+|Number of digits
+|Explanation
+
+|1
+|Member Id
+|Character string
+|8
+|Indicates a fixed 8 digit number which uniquely identifies a member.
+
+|2
+|Membership type
+|Character string
+|1
+|Membership type is as shown below. +
+"G"(Gold member), "N"(Normal member)
+
+|3
+|Product purchasing flag
+|Character string
+|1
+|It shows whether you have purchased a product in the month. +
+It is updated to "1" (process target) when the product is purchased and to "0" (initial status) during monthly batch process.
+
+|4
+|Points
+|Numeric value
+|7
+|It shows the points retained by the members. +
+Initial value is 0.
+
+|===
+
+Since header records and footer records are not being handled in this tutorial,
+refer <<Ch05_FileAccess.adoc#Ch05_FileAccess, File access>> for handling of header and footer record
+and file formats.
+
+[[Ch09_FileAccessJob_Overview_JobOverview]]
+=== Job overview
+Process flow and process sequence are shown below to understand the overview 
+of the job which inputs or outputs data by accessing file created here.
+
+The process sequence mentions the scope of transaction control, however, the operation is achieved by performing pseudo transaction control in case of a file.
+For details, refer to <<Ch05_Transaction.adoc#Ch05_Transaction_HowToUse_SingleDataSource_NonTx, Supplement for non-transactional data sources>>.
+
+//^
+Process flow overview::
+Process flow overview is shown below.
+
+.Process flow for file access job
+image::ch09/FileAccess/Ch09_FileAccessJob_ProcessFlow.png[ProcessFlow of FileAccess Job]
+
+//^
+Process sequence in case of a chunk model::
+Process sequence in case of a chunk model is explained.
+
+Orange object represents a class to be implemented this time.
+
+.Sequence diagram of chunk model
+image::Ch09_FileAccessJob_ProcessSequence_ChunkModel.png[ProcessSequence of FileAccess Job by ChunkModel]
+
+.Explanation of sequence diagram
+. A step is executed from the job.
+. Step opens the input resource.
+. ``FlatFileItemReader`` opens member_info(input) file.
+. Step opens an output resource.
+. ``FlatFileItemWriter`` opens member_info(output) file.
+** Repeat process from steps 6 to 16 until input data gets exhausted.
+** Start a framework transaction (pseudo) in chunk units.
+** Repeat process from steps 6 to 12 until a chunk size is achieved.
+. Step fetches 1 record of input data from ``FlatFileItemReader``.
+. ``FlatFileItemReader`` fetches 1 record of input data from member_info(input) file.
+. member_info(input) file returns input data to ``FlatFileItemReader``.
+. ``FlatFileItemReader`` returns input data to step.
+. Step performs a process for input data by ``PointAddItemProcessor``.
+. ``PointAddItemProcessor`` reads input data and adds points.
+. ``PointAddItemProcessor`` returns process results to the step.
+. Step outputs chunk size data by ``FlatFileItemWriter``.
+. ``FlatFileItemWriter`` buffers process results.
+. Step commits framework transaction (pseudo).
+. ``FlatFileItemWriter`` performs data flush and writes data in the buffer to member_info(output) file.
+. Step closes the input resource.
+. ``FlatFileItemReader`` closes member_info(input) file.
+. Step closes output resource.
+. ``FlatFileItemWriter`` closes member_info(output) file.
+. Step returns the exit code (here, successful completion: 0) to job.
+
+//^
+Process sequence in case of a tasklet model::
+Process sequence in case of a tasklet model is explained.
+
+Orange object represents a class to be implemented this time.
+
+.Sequence diagram of tasklet model
+image::Ch09_FileAccessJob_ProcessSequence_TaskletModel.png[ProcessSequence of FileAccess Job by TaskletModel]
+
+.Explanation of sequence diagram
+. Step is executed from the job.
+** Step starts a framework transaction (pseudo).
+. Step executes ``PointAddTasklet``.
+. ``PointAddTasklet`` opens an input resource.
+. ``FlatFileItemReader`` opens a member_info(input) file.
+. ``PointAddTasklet`` opens an output resource.
+. ``FlatFileItemWriter`` opens a member_info(output) file.
+** Repeat the process from steps 7 to 13 until the input data gets exhausted.
+** Repeat the process from steps 7 to 11 until a certain number of records is reached.
+. ``PointAddTasklet`` fetches 1 record of input data from ``FlatFileItemReader``.
+. ``FlatFileItemReader`` fetches 1 record of input data from member_info(input) file.
+. member_info(input) file returns input data to ``FlatFileItemReader``.
+. ``FlatFileItemReader`` returns input data to tasklet.
+. ``PointAddTasklet`` reads input data and adds points.
+. ``PointAddTasklet`` outputs a certain number of records by ``FlatFileItemWriter``.
+. ``FlatFileItemWriter`` buffers the process results.
+. ``PointAddTasklet`` closes the input resource.
+. ``FlatFileItemReader`` closes member_info(input) file.
+. ``PointAddTasklet`` closes output resource.
+. ``PointAddTasklet`` returns termination of process to step.
+. Step commits framework transaction (pseudo).
+. ``FlatFileItemWriter`` performs data flush and write the data in the buffer to member_info(output) file.
+. ``FlatFileItemWriter`` closes member_info(output) file.
+. Step returns exit code (here, successful completion:0).
+
+How to implement a chunk model and a tasklet model respectively is explained subsequently.
+
+* <<Ch09_FileAccessJob_Chunk>>
+* <<Ch09_FileAccessJob_Tasklet>>
+
+[[Ch09_FileAccessJob_Chunk]]
+== Implementation in chunk model
+Creation of a job which inputs or outputs data by accessing a file in chunk model, till execution of job are implemented by following procedure.
+
+. <<Ch09_FileAccessJob_Chunk_JobDefinition>>
+. <<Ch09_FileAccessJob_Chunk_Dto>>
+. <<Ch09_FileAccessJob_Chunk_FileAccess>>
+. <<Ch09_FileAccessJob_Chunk_Logic>>
+. <<Ch09_FileAccessJob_Chunk_Execution>>
+
+[[Ch09_FileAccessJob_Chunk_JobDefinition]]
+=== Creating a job Bean definition file
+In Bean definition file, configure a way to combine elements which constitute a job that inputs/outputs data by accessing a file in chunk model. +
+In this example, only the frame and common settings of Bean definition file are described and each component is configured in the subsequent sections.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <!-- (1) -->
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <!-- (2) -->
+    <context:annotation-config/>
+    
+    <!-- (3) -->
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.chunk"/>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Import a configuration that always reads required Bean definition while using {batch5_shortname}.
+
+|(2)
+|Enable Bean definition by using an annotation.
+Use it by combining with (3) while implementing ItemProcessor or Listener.
+
+|(3)
+|Configure the base package to be subjected for the component scanning. +
+Specify a package wherein a component to be used (implementation class of ItemProcessor etc) is stored, in ``base-package`` attribute. +
+Use it in combination with (2) while defining a Bean by using an annotation.
+
+|===
+
+[[Ch09_FileAccessJob_Chunk_Dto]]
+=== DTO implementation
+Implement DTO class as a class to retain business data. +
+Create DTO class for each file.
+
+Since it is used in common for chunk model / tasklet model, it can be skipped if it is created already.
+
+Implement DTO class as a class for conversion, as shown below.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.dto.MemberInfoDTO
+----
+package org.terasoluna.batch.tutorial.common.dto;
+
+public class MemberInfoDto {
+    private String id; // (1)
+
+    private String type; // (2)
+
+    private String status; // (3)
+
+    private int point; // (4)
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public int getPoint() {
+        return point;
+    }
+
+    public void setPoint(int point) {
+        this.point = point;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define ``id`` as a field that corresponds to member ID.
+
+|(2)
+|Define ``type`` as a field that corresponds to membership type.
+
+|(3)
+|Define ``status`` as a field that corresponds to product purchasing flag.
+
+|(4)
+Define ``point`` as a field that corresponds to points.
+
+|===
+
+[[Ch09_FileAccessJob_Chunk_FileAccess]]
+=== Defining file access
+Configure a job Bean definition file in order to input/output data by accessing a file.
+
+Add following (1) and subsequent details to job Bean definition file as a setting of ItemReader and ItemWriter. +
+For the configuration details not covered here, refer <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Input, Variable length record input>>
+and <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Output, Variable length record output>>.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+    
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.chunk"/>
+
+    <!-- (1) (2) -->
+    <bean id="reader"
+          class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+          p:resource="file:#{jobParameters['inputFile']}"
+          p:encoding="UTF-8"
+          p:strict="true">
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer"> <!-- (3) -->
+                    <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                          p:names="id,type,status,point"
+                          p:delimiter=","
+                          p:quoteCharacter='"'/> <!-- (4) (5) -->
+                </property>
+                <property name="fieldSetMapper"> <!-- (6) -->
+                    <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                          p:targetType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <!-- (7) (8) -->
+    <bean id="writer"
+          class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+          p:resource="file:#{jobParameters['outputFile']}"
+          p:encoding="UTF-8"
+          p:lineSeparator="&#x0A;"
+          p:appendAllowed="false"
+          p:shouldDeleteIfExists="true"
+          p:transactional="true">
+        <property name="lineAggregator"> <!-- (9) -->
+            <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator"
+                  p:delimiter=","> <!-- (10) -->
+                <property name="fieldExtractor"> <!-- (11) -->
+                    <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+                          p:names="id,type,status,point"/> <!-- (12) -->
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure ItemReader. +
+Specify ``org.springframework.batch.item.file.FlatFileItemReader`` which is an implementation class of ``ItemReader``
+in ``class`` attribute, in order to read flat file offered by {SB}.+
+Specify ``step`` scope in ``scope`` attribute.
+
+|(2)
+|Specify path of input file in ``resource`` attribute. +
+Although the path can be specified directly, the parameter name of input file path is specified
+here in order to pass it by parameter at the time of starting the job.
+
+|(3)
+|Configure lineTokenizer. +
+Specify ``org.springframework.batch.item.file.transform.DelimitedLineTokenizer`` - an implementation class of ``LineTokenizer``
+in ``class`` attribute, which divides the records by specifying a delimiter offered by {SB}. +
+It supports reading of escaped line feed character, delimiter and enclosed character, defined in the specifications of RFC-4180 which is considered as a general CSV format.
+
+|(4)
+|Set the name to be assigned to each field of 1 record, in ``names`` attribute. +
+Each field can be retrieved by using the name set in ``FieldSet`` used in ``FieldSetMapper``. +
+Specify each name with a comma delimiter from the beginning of the record.
+
+|(5)
+|Specify the comma as a delimiter in ``delimiter`` attribute.
+
+|(6)
+|Set ``fieldSetMapper``. +
+Since special conversions like character strings and numbers are not required at the moment,
+specify ``org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper``, in ``class`` attribute. +
+Specify DTO class created by <<Ch09_FileAccessJob_Chunk_Dto>> as a class for conversion, in ``targetType`` attribute.
+Accordingly, an instance is generated wherein a value is automatically set in the field that matches with name of each field set in (4).
+
+|(7)
+|Set ItemWriter. +
+Specify ``org.springframework.batch.item.file.FlatFileItemWriter`` - an implementation class of ``ItemWriter``,
+in ``class`` attribute in order to write to the flat file offered by {SB}. +
+Specify ``step`` scope in the ``scope`` attribute. +
+In this tutorial, set ``appendAllowed`` attribute to ``false``(do not write) and ``shouldDeleteIfExists`` attribute to ``true``(delete existing file)
+and ensure to create a new file no matter how many times a job is to be executed. +
+Enable pseudo transaction control by specifying ``transactional`` attribute to ``true``.
+
+|(8)
+|Set path of output file in ``resource`` attribute. +
+Parameter name of output file path is specified so that it can be passed by parameter at the start of the job.
+
+|(9)
+|Set ``lineAggregator``. +
+Specify ``org.springframework.batch.item.file.transform.LineAggregator`` to map the target Bean in 1 record, in ``class`` attribute. +
+Map the property of the Bean and each field in the record by ``FieldExtractor``.
+
+|(10)
+|Specify the comma as a delimiter, in ``delimiter`` attribute.
+
+|(11)
+|Set ``fieldExtractor``. +
+ Map the value that matches the field of DTO class specified in (6), in the name for each field specified in (12).  +
+Specify ``org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor`` in ``class`` attribute. +
+
+|(12)
+|Specify the name assigned to each field of 1 record, in ``names`` attribute.
+
+|===
+
+[[Ch09_FileAccessJob_Chunk_Logic]]
+=== Implementation of logic
+Implement business logic class which adds the points.
+
+Implement following operations.
+
+. <<Ch09_FileAccessJob_Chunk_Logic_ItemProcessor>>
+. <<Ch09_FileAccessJob_Chunk_Logic_Bean>>
+
+[[Ch09_FileAccessJob_Chunk_Logic_ItemProcessor]]
+==== Implementation of PointAddItemProcessor class
+Implement PointAddItemProcessor class which implements ItemProcessor interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.fileaccess.chunk.PointAddItemProcessor
+----
+package org.terasoluna.batch.tutorial.fileaccess.chunk;
+
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+
+@Component // (1)
+public class PointAddItemProcessor implements ItemProcessor<MemberInfoDto, MemberInfoDto> { // (2)
+
+    private static final String TARGET_STATUS = "1"; // (3)
+
+    private static final String INITIAL_STATUS = "0"; // (4)
+
+    private static final String GOLD_MEMBER = "G"; // (5)
+
+    private static final String NORMAL_MEMBER = "N"; // (6)
+
+    private static final int MAX_POINT = 1000000; // (7)
+
+    @Override
+    public MemberInfoDto process(MemberInfoDto item) throws Exception { // (8) (9) (10)
+        if (TARGET_STATUS.equals(item.getStatus())) {
+            if (GOLD_MEMBER.equals(item.getType())) {
+                item.setPoint(item.getPoint() + 100);
+            } else if (NORMAL_MEMBER.equals(item.getType())) {
+                item.setPoint(item.getPoint() + 10);
+            }
+
+            if (item.getPoint() > MAX_POINT) {
+                item.setPoint(MAX_POINT);
+            }
+
+            item.setStatus(INITIAL_STATUS);
+        }
+
+        return item;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define a Bean by assigning ``@Component`` annotation so as to subject it to component scanning.
+
+|(2)
+|Implement ``ItemProcessor`` interface which specifies the type of object used for input/output, in respective generics. +
+Objects used in input and  both specify ``MemberInfoDTO`` created by <<Ch09_DataBaseAccessJob_Chunk_Dto>> here.
+
+|(3)
+|Define a product purchasing flag:1 for the addition of points, as a constant +
+Essentially, these field constants are defined in constant classes and are not defined in the logic.
+It should be noted that it is defined as a constant for the sake of convenience, in this tutorial. (Same applies to following constants)
+
+|(4)
+|Define initial value of product purchasing flag:0 as a constant.
+
+|(5)
+|Define membership type:G (gold member), as a constant.
+
+|(6)
+|Define membership type:N (normal member),as a constant.
+
+|(7)
+|Define the upper limit value of points:1000000, as a constant.
+
+|(8)
+|Implement product purchasing flag and, business logic to add points according to membership type.
+
+|(9)
+|Type of return value is ``MemberInfoDTO`` - a type of output object specified by the generics
+of ``ItemProcessor`` interface implemented by this class.
+
+|(10)
+|Type of ``item`` received as an argument is ``MemberInfoDTO`` - a type of input object specified by generics
+of ``ItemProcessor`` interface implemented by this class.
+
+|===
+
+[[Ch09_FileAccessJob_Chunk_Logic_Bean]]
+==== Configuring Job Bean definition file
+Add following (1) and subsequent objects to job Bean definition file in order to set the created business logic as a job.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.chunk"/>
+
+    <bean id="reader"
+          class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+          p:resource="file:#{jobParameters['inputFile']}"
+          p:encoding="UTF-8"
+          p:strict="true">
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer">
+                    <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                          p:names="id,type,status,point"
+                          p:delimiter=","
+                          p:quoteCharacter='"'/>
+                </property>
+                <property name="fieldSetMapper">
+                    <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                          p:targetType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <bean id="writer"
+          class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+          p:resource="file:#{jobParameters['outputFile']}"
+          p:encoding="UTF-8"
+          p:lineSeparator="&#x0A;"
+          p:appendAllowed="false"
+          p:shouldDeleteIfExists="true"
+          p:transactional="true">
+        <property name="lineAggregator">
+            <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator"
+                  p:delimiter=",">
+                <property name="fieldExtractor">
+                    <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+                          p:names="id,type,status,point"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <!-- (1) -->
+    <batch:job id="jobPointAddChunk" job-repository="jobRepository">
+        <batch:step id="jobPointAddChunk.step01"> <!-- (2) -->
+            <batch:tasklet transaction-manager="jobTransactionManager">
+                <batch:chunk reader="reader"
+                             processor="pointAddItemProcessor"
+                             writer="writer" commit-interval="10"/> <!-- (3) -->
+            </batch:tasklet>
+        </batch:step>
+    </batch:job>
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set the job. +
+``id`` attribute must be unique within the range of all jobs included in 1 batch application. +
+Here, specify ``jobPointAddChunk`` as a job name of chunk model.
+
+|(2)
+|Configure step. +
+Although it is not necessary to have a ``id`` attribute unique within the range of all jobs included in 1 batch application, it should be taken as unique to enable easy tracking at the time of failure. +
+The format consists of [step + serial number] for the id attribute specified in (1) unless there is a specific reason. +
+Here, specify ``jobPointAddChunk.step01`` as a step name for chunk model job.
+
+|(3)
+|Configure chunk model job. +
+Specify Bean ID of ``ItemReader`` and ``ItemWriter`` defined in the previous section, in respective ``reader`` and ``writer`` attributes. +
+Specify ``pointAddItemProcessor`` - a Bean ID of implementation class of ItemProcessor, in ``processor`` attribute. +
+Set 10 as input data count per chunk, in ``commit-interval`` attribute.
+
+|===
+
+[NOTE]
+.Tuning of commit-interval
+====
+commit-interval is a tuning point for performance in the chunk model job.
+
+In this tutorial, it is set to 10, however the appropriate number varies depending on available machine resources and job characteristics.
+In case of the jobs which access multiple resources and process the data, process throughput can reach to 100 records from 10 records.
+On the other hand, when input and output resources are in 1:1 ratio and there are enough jobs to transfer data, process throughout can reach to 5,000 cases or 10,000 cases.
+
+It is preferable to temporarily place commit-interval at the time of 100 records while starting a job and then tune for each job according to performance measurement results implemented subsequently.
+====
+
+[[Ch09_FileAccessJob_Chunk_Execution]]
+=== Job execution and results verification
+Execute the created job on STS and verify the results.
+
+[[Ch09_FileAccessJob_Chunk_Execution_Run]]
+==== Executing job from execution configuration
+Create execution configuration as below and execute job. +
+For how to create execution configuration, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck, Operation check>>.
+
+Here, the job is executed by using normal system data. +
+Parameters of input and output file are added to Arguments tab as arguments.
+
+Execution configuration setting value::
+* Name: Any name (Example: Run FileAccessJob for ChunkModel)
+* Main tab
+** Project: ``terasoluna-batch-tutorial``
+** Main class: ``org.springframework.batch.core.launch.support.CommandLineJobRunner``
+* Arguments tab
+** Program arguments: ``META-INF/jobs/fileaccess/jobPointAddChunk.xml jobPointAddChunk inputFile=files/input/input-member-info-data.csv outputFile=files/output/output-member-info-data.csv``
+
+[[Ch09_FileAccessJob_Chunk_Execution_Console]]
+==== Verifying console log
+Verify that the log with following details is output to Console.
+
+[source, console]
+.Example of console log output
+----
+[2017/08/18 11:09:19] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddChunk]] completed with the following parameters: [{inputFile=files/input/input-member-info-data.csv, outputFile=files/output/output-member-info-data.csv, jsr_batch_run_id=386}] and the following status: [COMPLETED]
+[2017/08/18 11:09:19] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@735f7ae5: startup date [Fri Aug 18 11:09:12 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_FileAccessJob_Chunk_Execution_Exitcode]]
+==== Verifying exit code
+Verify that the process is executed successfully by using exit codes. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Verify that exit code (exit value) is 0 (successful termination).
+
+.Verifying exit codes
+image::ch09/FileAccess/Ch09_FileAccessJob_Confirm_ExitCode_ChunkModel.png[Confirm the Exit Code of FileAccess for ChunkModel]
+
+[[Ch09_FileAccessJob_Chunk_Execution_OutputFile]]
+==== Verifying member information file
+Compare input and output contents of member information file and verify that they are in accordance with the verification details.
+
+Verification details::
+* Member information file should be output in the output directory
+** Output file: files/output/output-member-info-data.csv
+* status field
+** Records with value "0"(initial status) should not exist
+* point field
+** Points should be added according to membership type, for point addition
+*** 100 points when the type field is "G"(gold member)
+*** 10 points when the type field is "N"(normal member)
+** Records with points exceeding 1,000,000 points (upper limit) should not exist
+
+Input and output details of member information file are as shown below. +
+File fields are output in the sequence of id(member id), type(membership type), status(product purchasing flag) and point(points).
+
+.Input and output details of member information file
+image::ch09/FileAccess/Ch09_FileAccessJob_Result_MemberInfoFile.png[File of member_info]
+
+[[Ch09_FileAccessJob_Tasklet]]
+== Implementation in tasklet model
+Implement the procedure from creation to execution of job which inputs and outputs data by accessing a file in tasklet model.
+
+. <<Ch09_FileAccessJob_Tasklet_JobDefinition>>
+. <<Ch09_FileAccessJob_Tasklet_Dto>>
+. <<Ch09_FileAccessJob_Tasklet_FileAccess>>
+. <<Ch09_FileAccessJob_Tasklet_Logic>>
+. <<Ch09_FileAccessJob_Tasklet_Execution>>
+
+[[Ch09_FileAccessJob_Tasklet_JobDefinition]]
+=== Creating job Bean definition file
+How to combine elements which constitute a job performing data input and output by accessing a file in Tasklet model, is configured in Bean definition file. +
+Here, only frame and common settings of Bean definition file are described, and set each configuration element in the following sections
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+    
+    <!-- (1) -->
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <!-- (2) -->
+    <context:annotation-config/>
+
+    <!-- (3) -->
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.tasklet"/>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Always import settings for reading required Bean definition while using {batch5_shortname}.
+
+|(2)
+|Enable Bean definition by using an annotation.
+When ItemProcessor or Listener are to be implemented, use it in combination with (3).
+
+|(3)
+|Specify a package which stores the components to be used (implementation class of Tasklet etc), in ``base-package`` attribute. +
+When Bean is to be defined by an annotation, use it in combination with (2).
+
+|===
+
+[[Ch09_FileAccessJob_Tasklet_Dto]]
+=== Implementation of DTO
+Implement a DTO class as a class to retain business data. +
+Create a DTO class for each file.
+
+Since it is used as a common in chunk model / tasklet model, it can be skipped if created already.
+
+Implement DTO class as a class for conversion as shown below.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.dto.MemberInfoDTO
+----
+package org.terasoluna.batch.tutorial.common.dto;
+
+public class MemberInfoDto {
+    private String id; // (1)
+
+    private String type; // (2)
+
+    private String status; // (3)
+
+    private int point; // (4)
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public int getPoint() {
+        return point;
+    }
+
+    public void setPoint(int point) {
+        this.point = point;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define ``id`` as a field corresponding to member id.
+
+|(2)
+|Define ``type`` as a field corresponding to membership type.
+
+|(3)
+|Define ``status`` as a field corresponding product purchasing flag.
+
+|(4)
+|Define ``point`` as a field corresponding to points.
+
+|===
+
+[[Ch09_FileAccessJob_Tasklet_FileAccess]]
+=== Defining file access
+Configure a job Bean definition file to input and output data by accessing a file.
+
+Add following (1) and subsequent objects to job Bean definition file as a setting of ItemReader and ItemWriter. +
+For the setting details not covered here, refer <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Input, Variable length record input>> 
+and <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Output, Variable length record output>>.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+    
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.chunk"/>
+
+    <!-- (1) (2) -->
+    <bean id="reader"
+          class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+          p:resource="file:#{jobParameters['inputFile']}"
+          p:encoding="UTF-8"
+          p:strict="true">
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer"> <!-- (3) -->
+                    <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                          p:names="id,type,status,point"
+                          p:delimiter=","
+                          p:quoteCharacter='"'/> <!-- (4) (5) -->
+                </property>
+                <property name="fieldSetMapper"> <!-- (6) -->
+                    <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                          p:targetType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <!-- (7) (8) -->
+    <bean id="writer"
+          class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+          p:resource="file:#{jobParameters['outputFile']}"
+          p:encoding="UTF-8"
+          p:lineSeparator="&#x0A;"
+          p:appendAllowed="false"
+          p:shouldDeleteIfExists="true"
+          p:transactional="true">
+        <property name="lineAggregator"> <!-- (9) -->
+            <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator"
+                  p:delimiter=","> <!-- (10) -->
+                <property name="fieldExtractor"> <!-- (11) -->
+                    <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+                          p:names="id,type,status,point"/> <!-- (12) -->
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure ItemReader. +
+Specify ``org.springframework.batch.item.file.FlatFileItemReader`` - an implementation class of ``ItemReader`` 
+to read flat file provided by {SB}, in ``class`` attribute. +
+Specify ``step`` scope in ``scope`` attribute.
+
+|(2)
+|Specify path of input file in ``resource`` attribute. +
+Although the path can also be specified directly, a parameter name of input file path is specified here
+in order to pass it as a parameter at the time of starting the job.
+
+|(3)
+|Configure lineTokenizer. +
+Specify ``org.springframework.batch.item.file.transform.DelimitedLineTokenizer`` - an implementation class of ``LineTokenizer``, in ``class`` attribute
+which splits the records by specifying a delimiter provided by {SB}. +
+It handles reading of escaped newline character, delimiter and enclosed character, defined in specifications of RFC-4180 which is considered as a general CSV format.
+
+|(4)
+|Set the name assigned to each field of 1 record, in ``names`` attribute. +
+Each item can be retrieved by using the name set in ``FieldSet`` which is used in ``FieldSetMapper``. +
+Specify each name with a comma separator from the beginning of record.
+
+|(5)
+|Specify a comma as a delimiter, in ``delimiter`` attribute.
+
+|(6)
+|Set ``fieldSetMapper``. +
+Specify ``org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper``, in ``class`` attribute
+since special conversion process like character string or numerals is not required here. +
+Specify a DTO class created in <<Ch09_FileAccessJob_Chunk_Dto as a class for conversion, in ``targetType`` attribute.
+Accordingly, an instance is generated by automatically setting a value in a field that matches the name of each item set in (4).
+
+|(7)
+|Set ItemWriter. +
+Specify ``org.springframework.batch.item.file.FlatFileItemWriter`` - an implementation class of ``ItemWriter``, in ``class`` attribute
+in order to write to a flat file offered by {SB}. +
+Specify ``step`` scope, in ``scope`` attribute. +
+In this tutorial, ``appendAllowed`` attribute is set to ``false``(do not add) and ``shouldDeleteIfExists`` attribute is set to ``true``(delete existing file)
+and it is ensured that a new file is created no matter how many times a job is executed. +
+Specify ``true`` in ``transactional`` attribute, and enable pseudo transaction control.
+
+|(8)
+|Set path of output file in ``resource`` attribute. +
+A parameter name of output file path is specified in order to pass it as a parameter at the time of starting a job.
+
+|(9)
+|Set ``lineAggregator``. +
+Specify ``org.springframework.batch.item.file.transform.LineAggregator``, in ``class`` attribute in order to map target Bean to 1 record. +
+Map properties of the Bean and each item in the record by ``FieldExtractor``.
+
+|(10)
+|Specify a comma as a delimiter, in ``delimiter`` attribute.
+
+|(11)
+|Set ``fieldExtractor``. +
+Map the value that matches the field of DTO class specified in (6), to the name of each item specified in (12).  +
+Specify ``org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor``, in ``class`` attribute. +
+
+|(12)
+|Set the name assigned to each item of 1 record, in ``names`` attribute.
+
+|===
+
+[NOTE]
+.Implementation of Tasklet which use chunk model components
+====
+In this tutorial, ItemReader.ItemWriter which are components of chunk model are used
+in order to easily create a job which accesses a file in the chunk model.
+
+Refer <<Ch03_CreateTaskletJob#Ch03_CreateTaskletJob_HowToUse_Implements_InOut, Tasklet implementation using components of chunk model>>
+and determine appropriately for whether to use various components of chunk model during Tasklet implementation.
+====
+
+[[Ch09_FileAccessJob_Tasklet_Logic]]
+=== Implementation of logic
+Implement a business logic class which adds the points.
+
+Implement following operations.
+
+. <<Ch09_FileAccessJob_Tasklet_Logic_Tasklet>>
+. <<Ch09_FileAccessJob_Tasklet_Logic_Bean>>
+
+[[Ch09_FileAccessJob_Tasklet_Logic_Tasklet]]
+==== Implementation of PointAddTasklet class
+Create PointAddTasklet class which implements Tasklet interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.fileaccess.tasklet.PointAddTasklet
+----
+package org.terasoluna.batch.tutorial.fileaccess.tasklet;
+
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ItemStreamException;
+import org.springframework.batch.item.ItemStreamReader;
+import org.springframework.batch.item.ItemStreamWriter;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+
+import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
+
+@Component // (1)
+@Scope("step") // (2)
+public class PointAddTasklet implements Tasklet {
+
+    private static final String TARGET_STATUS = "1"; // (3)
+
+    private static final String INITIAL_STATUS = "0"; // (4)
+
+    private static final String GOLD_MEMBER = "G"; // (5)
+
+    private static final String NORMAL_MEMBER = "N"; // (6)
+
+    private static final int MAX_POINT = 1000000; // (7)
+
+    private static final int CHUNK_SIZE = 10; // (8)
+
+    @Inject // (9)
+    ItemStreamReader<MemberInfoDto> reader; // (10)
+
+    @Inject // (9)
+    ItemStreamWriter<MemberInfoDto> writer; // (11)
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception { // (12)
+        MemberInfoDto item = null;
+
+        List<MemberInfoDto> items = new ArrayList<>(CHUNK_SIZE); // (13)
+        try {
+
+            reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext()); // (14)
+            writer.open(chunkContext.getStepContext().getStepExecution().getExecutionContext()); // (14)
+
+            while ((item = reader.read()) != null) { // (15)
+
+                if (TARGET_STATUS.equals(item.getStatus())) {
+                    if (GOLD_MEMBER.equals(item.getType())) {
+                        item.setPoint(item.getPoint() + 100);
+                    } else if (NORMAL_MEMBER.equals(item.getType())) {
+                        item.setPoint(item.getPoint() + 10);
+                    }
+
+                    if (item.getPoint() > MAX_POINT) {
+                        item.setPoint(MAX_POINT);
+                    }
+
+                    item.setStatus(INITIAL_STATUS);
+                }
+
+                items.add(item);
+
+                if (items.size() == CHUNK_SIZE) { // (16)
+                    writer.write(items); // (17)
+                    items.clear();
+                }
+            }
+            
+            writer.write(items); // (18)
+        } finally {
+            try {
+                reader.close(); // (19)
+            } catch (ItemStreamException e) {
+                // do nothing.
+            }
+            try {
+                writer.close(); // (19)
+            } catch (ItemStreamException e) {
+                // do nothing.
+            }
+        }
+
+        return RepeatStatus.FINISHED; // (20)
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Assign ``@Component`` annotation and define a Bean for subjecting it to component scanning.
+
+|(2)
+|Assign @Scope annotation to the class and specify ``step`` scope.
+
+|(3)
+|Define product purchasing flag:1 for point addition, as a constant. +
+Originally, such a field constant is defined in a constant class, and it is very rarely defined in the logic.
+In this tutorial, it is considered to be defined as a constant, for the sake of convenience (same is applicable to subsequent constants)
+
+|(4)
+|Define initial value:0 for product purchasing flag, as a constant.
+
+|(5)
+|Define membership type: G (gold member), as a constant.
+
+|(6)
+|Define membership type: N (Normal member),as a constant.
+
+|(7)
+|Define upper limit value: 1000000, as a constant.
+
+|(8)
+|Define unit to be processed together (fixed number): 10, as a constant.
+
+|(9)
+|Assign ``@Inject`` annotation and inject implementation of ``ItemStreamReader/ItemStreamWriter``.
+
+|(10)
+|Define type as ``ItemStreamReader`` - sub-interface of ``ItemReader`` to access the file. +
+``ItemStreamReader`` is required to open/close a resource.
+
+|(11)
+|Define type as ``ItemStreamWriter`` - sub-interface of ``ItemWriter`` to access the file. +
+``ItemStreamWriter`` is required to open/close the resource.
+
+|(12)
+|Implement a product purchasing flag, and business logic to add points according to membership type.
+
+|(13)
+|Define a list to store a fixed number of ``item``.
+
+|(14)
+|Open input and output resource.
+
+|(15)
+|Perform a loop through all input resources +
+``ItemReader#read`` returns ``null`` when all the input data reaches end of reading.
+
+|(16)
+|Determine whether number of ``item`` added to the list has reached a fixed number. +
+When it reaches a certain number, output to the file in (17) and ``clear`` the list.
+
+|(17)
+|Output processed data to the file.
+
+|(18)
+|Output overall process records/remaining balance records.
+
+|(19)
+|Close input and output resource.
+
+|(20)
+|Return whether Tasklet process has been completed. +
+Always specify ``return RepeatStatus.FINISHED;``.
+
+|===
+
+[[Ch09_FileAccessJob_Tasklet_Logic_Bean]]
+==== Configuring job Bean definition file
+Add following (1) and subsequent details to job Bean definition file in order to set created business logic as a job.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/fileaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.fileaccess.tasklet"/>
+
+    <bean id="reader"
+          class="org.springframework.batch.item.file.FlatFileItemReader" scope="step"
+          p:resource="file:#{jobParameters['inputFile']}"
+          p:encoding="UTF-8"
+          p:strict="true">
+        <property name="lineMapper">
+            <bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+                <property name="lineTokenizer">
+                    <bean class="org.springframework.batch.item.file.transform.DelimitedLineTokenizer"
+                          p:names="id,type,status,point"
+                          p:delimiter=","
+                          p:quoteCharacter='"'/>
+                </property>
+                <property name="fieldSetMapper">
+                    <bean class="org.springframework.batch.item.file.mapping.BeanWrapperFieldSetMapper"
+                          p:targetType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <bean id="writer"
+          class="org.springframework.batch.item.file.FlatFileItemWriter" scope="step"
+          p:resource="file:#{jobParameters['outputFile']}"
+          p:encoding="UTF-8"
+          p:lineSeparator="&#x0A;"
+          p:appendAllowed="false"
+          p:shouldDeleteIfExists="true"
+          p:transactional="true">
+        <property name="lineAggregator">
+            <bean class="org.springframework.batch.item.file.transform.DelimitedLineAggregator"
+                  p:delimiter=",">
+                <property name="fieldExtractor">
+                    <bean class="org.springframework.batch.item.file.transform.BeanWrapperFieldExtractor"
+                          p:names="id,type,status,point"/>
+                </property>
+            </bean>
+        </property>
+    </bean>
+
+    <!-- (1) -->
+    <batch:job id="jobPointAddTasklet" job-repository="jobRepository">
+        <batch:step id="jobPointAddTasklet.step01"> <!-- (2) -->
+            <batch:tasklet transaction-manager="jobTransactionManager"
+                           ref="pointAddTasklet"/> <!-- (3) -->
+        </batch:step>
+    </batch:job>
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure job. +
+``id`` attribute must be unique within the scope of all jobs included in 1 batch application. +
+Here, specify ``jobPointAddTasklet`` as a job name of tasklet model.
+
+|(2)
+|Configure step. +
+``id`` attribute is not required to be unique within the scope of all the jobs included in 1 batch application, however a unique attribute is used since it helps in easy tracking at the time of failure. +
+[step+Sr.No.] is added to id attribute specified in (1) unless there is a specific reason otherwise. +
+Here, specify ``jobPointAddTasklet.step01`` as a step name of tasklet model job.
+
+|(3)
+|Configure tasklet. +
+Specify ``pointAddTasklet`` - a Bean ID of implementation class of Tasklet in ``ref`` attribute.
+
+|===
+
+[[Ch09_FileAccessJob_Tasklet_Execution]]
+=== Job execution and results verification
+Execute created job on STS and verify results.
+
+[[Ch09_FileAccessJob_Tasklet_Execution_Run]]
+==== Execute job from execution configuration
+Create execution configuration as shown below and execute job. +
+For how to create execution configuration, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck, Operation check>>.
+
+Here, execute job by using normal data system. +
+Add parameters of input and output file to Arguments tab, as arguments.
+
+Setup value of execution configuration::
+* Name: Any name (Example: Run FileAccessJob for TaskletModel)
+* Main tab
+** Project: ``terasoluna-batch-tutorial``
+** Main class: ``org.springframework.batch.core.launch.support.CommandLineJobRunner``
+* Arguments tab
+** Program arguments: ``META-INF/jobs/fileaccess/jobPointAddTasklet.xml jobPointAddTasklet inputFile=files/input/input-member-info-data.csv outputFile=files/output/output-member-info-data.csv``
+
+[[Ch09_FileAccessJob_Tasklet_Execution_Console]]
+==== Verifying console log
+Verify that following log details are output in Console.
+
+[source, console]
+.Output example of console log
+----
+[2017/09/12 10:13:18] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddTasklet]] completed with the following parameters: [{inputFile=files/input/input-member-info-data.csv, outputFile=files/output/output-member-info-data.csv, jsr_batch_run_id=474}] and the following status: [COMPLETED]
+[2017/09/12 10:13:18] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@735f7ae5: startup date [Tue Sep 12 10:13:16 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_FileAccessJob_Tasklet_Execution_Exitcode]]
+==== Verifying exit codes
+Verify that the process has terminated successfully using exit code. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Verify that exit code (exit value) is 0(successful termination).
+
+.Verifying exit codes
+image::ch09/FileAccess/Ch09_FileAccessJob_Confirm_ExitCode_TaskletModel.png[Confirm the Exit Code of FileAccessJob for TaskletModel]
+
+[[Ch09_FileAccessJob_Tasklet_Execution_OutputFile]]
+==== Verifying member information file
+Compare input and output contents of member information and verify that the details are in accordance with the verification details.
+
+Verification details::
+* Member information file should output in the output directory
+** Output file: files/output/output-member-info-data.csv
+* status field
+** Records with value "0"(initial status) should not exist
+* point field
+** Points should be added according to membership type, for point addition
+*** 100 points when type field is "G"(gold member)
+*** 10 points when type field is "N"(normal member)
+** Points should not exceed 1,000,000 points(upper limit value)
+
+Input and output contents of member information file are as below. +
+File fields are output in the sequence id(member ID), type(membership type), status(product purchasing flag) and point(points).
+
+.Input and output contents of member information file
+image::ch09/FileAccess/Ch09_FileAccessJob_Result_MemberInfoFile.png[File of member_info]

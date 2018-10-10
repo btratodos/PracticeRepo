@@ -1,0 +1,174 @@
+include::_include_all.adoc[]
+
+[[Ch99_SummaryOfPoints]]
+= Summary of points
+
+[[Ch99_SummaryOfPoints_AboutThis]]
+== Notes on {batch5_shortname}
+This is a summarized list of the rules and notes about using {batch5_shortname} that are explained in each section.
+Users should keep in mind the following points and proceed when developing a batch application.
+
+[WARNING]
+====
+Only the salient points are mentioned here instead of covering the entire consider material.
+Users should read the guideline of function to be used.
+====
+
+---
+
+.Rules and notes to be considered for batch process
+
+* Single batch process should be simplified and complex logical structures should be avoided.
+* Same operation should not be performed in multiple jobs over and over again.
+* Usage of system resources should be minimized, unnecessary physical I/O should be avoided and on-memory operations should be utilized.
+
+---
+
+.Guidelines for {batch5_shortname}
+
+* <<Ch03_CreateProject.adoc#Ch03_CreateProject, Development of batch application>>
+** Create as 1 job=1 Bean definition(1 job definition)
+** Create as 1 step=1 batch process=1 business logic
+* <<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob, Chunk model>>
+** Use it for efficiently processing large amount of data.
+* <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob, Tasklet model>>
+** Use for simple processing, processing that is hard to standardize, and to process data by single commit.
+* <<Ch04_SyncJob.adoc#Ch04_SyncJob, Synchronous job>>
+** Use for starting a job as per the schedule and for batch processing by combining multiple jobs.
+* <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB, Asynchronous job(DB polling)>>
+** Use for delayed process, continuous execution of job with short processing time and consolidation of large jobs.
+* <<Ch04_AsyncJobWithWebContainer.adoc#Ch04_AsyncJobWithWeb, Asynchronous job (Web container)>>
+** Similar to DB polling. However, use when instantaneous start is required.
+* Management of JobRepository
+** In {SB}, use ``JobRepository`` for recording start status and execution result of job.
+** In {batch5_shortname}, persistence is optional if it corresponds to all the following.
+*** Using {batch5_shortname} for executing synchronous job only.
+*** All job execution management including stop, restart of job is assigned to the job scheduler.
+**** Do not use restart where the ``JobRepository`` possessed by {SB} is a prerequisite.
+** When these are applicable, use `` H2`` which is an in-memory and built-in database as an option of RDBMS used by `` JobRepository``.
+On the other hand, when using asynchronous job or stop and restart by {SB}, RDBMS that can make the job execution status and result permanent, is required. +
+For this point, <<Ch07_JobManagement.adoc#, Job management>> should also be read.
+
+---
+
+.How to choose chunk model or tasklet model
+
+* <<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob, Chunk model>>
+** When you want to steadily process large amount of data
+** When you want to restart based on the record count
+* <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob, Tasklet model>>
+** When you want to make recovery as simple as possible
+** When you want to consolidate the process contents
+
+<<Ch03_ChunkOrTasklet.adoc#Ch03_ChunkOrTasklet,How to choose chunk model or tasklet model>> should also be read.
+
+---
+
+.Unification of bean scope
+
+* In the Tasklet implementation, match with the scope of component to be Injected.
+* Composite type component matches with the scope of component to be delegated.
+* When using JobParameter, set to the scope of `` step``.
+* If you want to save instance variables in Step unit, set to the scope of `` step``.
+
+---
+
+.Performance tuning points
+
+* Adjust chunk size
+** When using Chunk, set the number of commits to an appropriate size. Do not increase the size too much.
+* Adjust fetch size
+** In database access, set fetch size to an appropriate size. Do not increase the size too much.
+* Make file reading more efficient
+** Provide a dedicated FieldSetMapper interface implementation.
+* Parallel process and multiple processes
+** Implement by job scheduler.
+* Distributed processing
+** Implement by job scheduler.
+
+---
+
+[[Ch99_SummaryOfPoints_dbpolling]]
+.Asynchronous job (DB polling)
+
+* Usage of in-memory database
+** It is not suitable for long-term continuous operation so it is desirable to restart it periodically.
+** When it is to be used for long-term continuous operation, maintenance work such as periodically deleting data from ``JobRepository`` is required.
+* Narrow-down of registered job
+** Specify the designed and implemented job based on asynchronous execution.
+* Mass processing of very short batch is not suitable since performance deterioration is possible.
+* Since parallel execution of the same job is possible, it is necessary to prevent the same job from affecting in parallel execution
+
+---
+
+.Asynchronous job (Web container)
+
+* The basic consideration is same as <<Ch99_SummaryOfPoints_dbpolling, Asynchronous job (DB polling)>>.
+* Adjust thread pool.
+** Apart from the thread pool of asynchronous execution, it is necessary to consider the request thread of the Web container and other applications operating within the same unit.
+* In Web and batch, you cannot cross-reference data source, MyBatis setting and Mapper interface.
+* Failure to start a job due to thread pool exhaustion cannot be captured at job start, so provide a means to confirm it separately.
+
+---
+
+.Database access and transaction
+
+* "Use ``MyBatisBatchItemWriter`` in ItemWriter" and "Update reference using Mapper interface in ItemProcessor" cannot be done at the same time.
+** There is a restriction in MyBatis of not executing with two or more `` ExecutorType`` in the same transaction.
+Refer to <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor,Database access of other than ItemReader/ItemWriter>>.
+* Notes on input/output of database to the same table
+** As the result of losing the information that guarantees reading consistency due to output (issue of UPDATE), error may occur in the input (SELECT). Consider the following measures.
+*** It depends on the database so, increase the area to secure the information.
+*** Split the input data and perform multiple processing.
+
+---
+
+.File access
+
+* When dealing with the following fixed-length file, be sure to use the component provided by {batch5_shortname}.
+** Fixed-length file containing multibyte characters
+** Fixed length file without line break
+* When skipping footer records, it is necessary to process with OS command.
+
+---
+
+.Exclusive control
+
+* When multiple jobs are concurrently executed, design a job so that the exclusive control is not required.
+** Resources to be accessed and processing targets should be split for each job.
+* Design in such a way that deadlocks are prevented from occurring.
+* File exclusive control should be implemented in the tasklet model.
+
+---
+
+.Handling abnormal system
+
+* Do not perform transaction processing in exception handling.
+* Note that ChunkListener behaves differently by the process model.
+** The exceptions generated by opening and closing the resources are
+*** Chunk model: Not in the scope of catching  by ChunkListener interface.
+*** Tasklet model: In the scope of catching  by ChunkListener interface.
+* Input check error cannot be recovered even by restarting unless the input resource that is the cause of check error is modified
+* How to cope when a failure occurs in JobRepository should be considered.
+
+---
+
+.About ExecutionContext
+
+* Since ``ExecutionContext`` is stored in the ``JobRepository``, there are following restrictions.
+** The object to be stored in ``ExecutionContext`` should be the class that implements ``java.io.Serializable``.
+** There should be a limit in the size that can be stored.
+
+---
+
+.Exit code
+
+* Exit code at the time of forced termination of Java process and the exit code of batch application are clearly distinguished.
+**  It is strictly prohibited to set the exit code of process to 1 by batch application.
+
+---
+
+.Parallel processing and multiple processing
+
+* Do not use ``Multi Thread Step``.
+* Depending on the processing content, be careful to possibility of resource contention and deadlock

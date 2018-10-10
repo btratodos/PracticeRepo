@@ -1,0 +1,12 @@
+include::_include_all.adoc[]
+
+[[Ch03]]
+= Methodology of application development
+
+. <<Ch03_CreateProject.adoc#Ch03_CreateProject,Development of batch application>>
+
+. <<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob, Creating chunk model job>>
+
+. <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob, Creating tasklet model job>>
+
+. <<Ch03_ChunkOrTasklet.adoc#Ch03_ChunkOrTasklet, How to choose chunk model or tasklet model>>

@@ -1,0 +1,155 @@
+include::_include_all.adoc[]
+
+[[Ch04_SyncJob]]
+= Synchronous job
+
+[[Ch04_SyncJob_Overview]]
+== Overview
+
+Synchronous job is explained.
+Synchronous job is the execution method of launching a new process through shell by job scheduler and returning the execution result of the job to the caller.
+
+.Overview of synchronous job
+image::Ch04_syncJob_overview.png[overview of sync job]
+
+.Sequence of synchronous job
+image::Ch04_syncjob_seq.png[sequence of sync job]
+
+The usage method of this function is same in the chunk model as well as tasklet model.
+
+[[Ch04_SyncJob_HowToUse]]
+== How to use
+
+How to running a job by ``CommandLineJobRunner`` is explained.
+
+Refer to <<Ch03_CreateProject.adoc#Ch03_CreateProject, Create project>> for building and executing the application.
+Refer to <<Ch04_JobParameter.adoc#, Job parameters>> for how to specify and use job parameters.
+Some explanation given in the above reference and in this section overlap however, the elements of synchronous job are mainly explained.
+
+[[Ch04_SyncJob_HowToUse_Run]]
+=== How to run
+
+In {batch5_shortname}, run the synchronous job using ``CommandLineJobRunner`` provided by {SB}.
+Start ``CommandLineJobRunner`` by issuing java command as shown below.
+
+[[Ch04_SyncJob_HowToUse_Run_Syntax]]
+[source,console]
+.CommandLineJobRunner syntax
+----
+$ java org.springframework.batch.core.launch.support.CommandLineJobRunner <jobPath> <options> <jobIdentifier> <jobParameters>
+----
+
+[cols="10,80,10", options="header"]
+.Items to be specified by the arguments
+|===
+|Items to be specified
+|Explanation
+|Required
+
+|jobPath
+|Bean definition file path where the settings of the job to be run are described. Specify by relative path from classpath.
+|icon:check[]
+
+|options
+|Specify various options (stop, restart etc.) at the time of launching.
+|
+
+|jobIdentifier
+|Specify job name in Bean definition or job run ID after job execution as the job identifier.
+Normally, specify job name. Specify job run ID only when specifying stop and restart options.
+|icon:check[]
+
+|jobParameters
+|Specify job arguments. Specify in ``key=value`` format.
+|
+
+|===
+
+The execution example when only the required items are specified, is shown below.
+
+[source,console]
+.Execution example 1 of CommandLineJobRunner
+----
+$ java -cp 'target/[artifactId]-[version].jar:lib/*' \ # (1)
+    org.springframework.batch.core.launch.support.CommandLineJobRunner \ # (2)
+    META-INF/jobs/job01.xml job01 # (3)
+----
+
+[source,xml]
+.Settings of Bean definition(Abstract)
+----
+<batch:job id="job01" job-repository="jobRepository"> <!-- (3) -->
+    <batch:step id="job01.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="employeeReader"
+                         processor="employeeProcessor"
+                         writer="employeeWriter" commit-interval="10" />
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify the batch application jar and dependent jar in ``classpath`` at the time of executing ``java`` command.
+ Here, it is specified by command arguments however, environment variables can also be used.
+
+|(2)
+|Specify ``CommandLineJobRunner`` with FQCN in the class to be run.
+
+|(3)
+|Pass the run arguments along the ``CommandLineJobRunner``.
+Here, 2 job names are specified as ``jobPath`` and ``jobIdentifier``.
+
+|===
+
+Execution example when launch parameters are specified as the optional items, is shown below.
+
+[source,console]
+.Execution example 2 of CommandLineJobRunner
+----
+$ java -cp 'target/[artifactId]-[version].jar:lib/*' \
+    org.springframework.batch.core.launch.support.CommandLineJobRunner \
+    META-INF/jobs/setupJob.xml setupJob target=server1 outputFile=/tmp/result.csv # (1)
+----
+
+[cols="10,90", options="header"]
+.Items list of setting contents
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|``target=server1`` and ``outputFile=/tmp/result.csv`` are specified as job running parameters.
+
+|===
+
+
+[[Ch04_SyncJob_HowToUse_Options]]
+=== Options
+
+Supplement the options indicated in <<Ch04_SyncJob_HowToUse_Run_Syntax>>.
+
+In ``CommandLineJobRunner``, the following 4 launch options can be used.
+Here, only the overview of each option is explained.
+
+-restart::
+  Restarts the failed job. Refer to <<Ch06_ReProcessing.adoc#,Reprocessing>> for the details.
+-stop::
+  Stops a running job. Refer to <<Ch07_JobManagement.adoc#,Job management>> for the details.
+-abandon::
+  Abandons a stopped job. The abandoned job cannot be restarted.
+  In {batch5_shortname}, there is no case of using this option, hence it is not explained.
+-next::
+  Runs the job executed once in the past, again. However, in {batch5_shortname}, this option is not used. +
+  In {batch5_shortname}, it is for avoiding the restriction "Running the job by the same parameter is recognized as the same job and the same job can be executed only once"
+  that is given by default in {SB}. +
+  The details are explained in <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_Converter, regarding parameter conversion class>>. +
+  For using this option, implementation class of ``JobParametersIncrementer`` interface is required,
+  it is not set in{batch5_shortname}. +
+  Therefore, when this option is specified and launched, an error occurs because the required Bean definition does not exist.

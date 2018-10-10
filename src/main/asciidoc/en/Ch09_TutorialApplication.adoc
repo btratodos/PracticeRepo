@@ -1,0 +1,136 @@
+include::_include_all.adoc[]
+
+[[Ch09_TutorialApplication]]
+= Description of the application to be created
+
+[[Ch09_Application_Overview]]
+== Background
+Some mass retail stores issue point cards for members. +
+Membership types include "Gold member", "Normal member" and the services are provided based on the membership types. +
+As a part of the service, 100 points are added for "gold members" and 10 points are added for "normal members" at the end of the month, for the members who have purchased a product during that month.
+
+[[Ch09_Application_ProcessingOverview]]
+== Process overview
+{batch5_shortname} will be using an application as a monthly batch process which adds points based on membership type.
+
+[[Ch09_Application_BusinessRequirements]]
+== Business specifications
+Business specifications are as shown below.
+
+* "Members who have purchased a product within the month" are indicated by "product purchasing" flag
+** Product purchasing flag "0" indicates initial state whereas "1" indicates processing target
+* When Product purchasing flag is "1"(processing target), points are added according to membership type
+** Add 100 points when membership type is "G"(gold member) and add 10 points when membership type is "N"(Normal member)
+* Product purchasing flag is updated to "0" (initial state) after adding points
+* Upper limit for the points is 1,000,000 points
+* If the points exceed 1,000,000 points after adding the points, they are adjusted to 1,000,000 points
+
+[[Ch09_Application_ImplementationMethod]]
+== Learning contents
+
+We will learn about various functions and processing methods related to jobs by creating applications for simple business specifications. +
+Note that jobs implement tasklet model and chunk model respectively. +
+The main learning in each job is the functions and processing methods used in the job are shown below.
+
+[cols="5,30,65", options="header"]
+.Jobs created in this tutorial
+|===
+|Sr. No.
+|Jobs
+|Contents learnt
+
+|A
+|<<Ch09_DBAccessJob.adoc#Ch09_DBAccessJob, A job that inputs/outputs data by accessing a database>>
+|Learn about database access method which use ItemReader and ItemWriter for MyBatis.
+
+|B
+|<<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob, A job that inputs/outputs data by accessing a file>>
+|Learn about file access method which use ItemReader and ItemWriter for input and output of a flat file.
+
+|C
+|<<Ch09_ValidationJob.adoc#Ch09_ValidationJob, A job that validates input data>>
+|Learn input check methods using Bean Validation.
+
+|D
+|<<Ch09_ExceptionHandlingWithListenerJob.adoc#Ch09_ExceptionHandlingWithListenerJob, A job that performs exception handling by ChunkListener>>
+|Learn exception handling methods which use ChunkListener as a listener.
+
+|E
+|<<Ch09_ExceptionHandlingWithTryCatchJob.adoc#Ch09_ExceptionHandlingWithTryCatchJob, A job which performs exception handling by try-catch>>
+|Learn exception handling and skipping which use try-catch, and a method which outputs customised exit codes.
+
+|F
+|<<Ch09_AsyncExecutionJob.adoc#Ch09_AsyncExecutionJob, Asynchronous execution type job>>
+|Learn the methods of asynchronous execution which use DB polling function offered by {batch5_shortname}.
+
+|===
+
+Correspondence table for Functions and processing methods used in A~F jobs, and explanation of {batch5_guide} is shown as below.
+
+[cols="5,41,9,9,9,9,9,9", options="header"]
+.Correspondence table for A~F jobs and {batch5_guide} explanation
+|===
+|Sr. No.
+|Functions |A |B |C |D |E |F
+
+|1
+|Start job > Activation method > <<Ch04_SyncJob.adoc#Ch04_SyncJob, Synchronous execution>> |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
+
+|2
+|Start job > Activation method > <<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB, Asynchronous execution (DB polling)>> | | | | | |[red]#Chunk# [blue]#Tasklet#
+
+|3
+|Start job > Start-up parameters of job > <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_CLIArgs, Assign from command line argument>> | |[red]#Chunk# [blue]#Tasklet# | | | |
+
+|4
+|Start job > <<Ch04_Listener.adoc#Ch04_Listener, Listener>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
+
+|5
+|Data input/output > Transaction control > <<Ch05_Transaction.adoc#Ch05_Transaction_architecture_UnderSpringBatch, Transaction control in {SB}>> |[red]#Chunk# [blue]#Tasklet# | | | | |
+
+|6
+|Data input/output > Transaction control > Single data source > <<Ch05_Transaction.adoc#Ch05_Transaction_HowToUse_SingleDataSource_Tx, Implementing transaction control>> |[red]#Chunk# [blue]#Tasklet# | | | | |
+
+|7
+|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Database access in ItemReader>> |[red]#Chunk# | | | | |
+
+|8
+|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output, Database access in ItemWriter>> |[red]#Chunk# | | | | |
+
+|9
+|Application development flow > Create Tasklet model job > <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob_HowToUse_Implements_InOut, Tasklet implementation which use components of chunk model>> |[blue]#Tasklet# | | | | |
+
+|10
+|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Input, Input>> | |[red]#Chunk# [blue]#Tasklet# | | | |
+
+|11
+|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Output, Output>> | |[red]#Chunk# [blue]#Tasklet# | | | |
+
+|12
+|Handling abnormalities > <<Ch06_InputValidation.adoc#Ch06_InputValidation, Input check>> | | |[red]#Chunk# [blue]#Tasklet# | |[red]#Chunk# [blue]#Tasklet# |
+
+|13
+|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_ChunkListener, Exception handling by using ChunkListener interface>> | | | |[red]#Chunk# [blue]#Tasklet# | |
+
+|14
+|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk, Exception handling in chunk model>> | | | | |[red]#Chunk# |
+
+|15
+|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet, Exception handling in tasklet model>> | | | | |[blue]#Tasklet# |
+
+|16
+|Handling abnormalities > Exception handling > Determine whether to continue processing > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_Overview_Deal_Skip, Skip>> | | | | |[red]#Chunk# [blue]#Tasklet# |
+
+|17
+|Job management > Job status management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement_Retrieve, Verify job status and execution results>> | | | | | |[red]#Chunk# [blue]#Tasklet#
+
+|18
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, Customize exit code>> | | | | |[red]#Chunk# [blue]#Tasklet# |
+
+|19
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_Logging, Logging>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
+
+|20
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_MessageManagement, Message management>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
+
+|===

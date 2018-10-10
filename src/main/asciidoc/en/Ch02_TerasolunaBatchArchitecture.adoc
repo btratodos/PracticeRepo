@@ -1,0 +1,260 @@
+include::_include_all.adoc[]
+
+[[Ch02_TerasolunaBatchArch]]
+= Architecture of {batch5_fullname}
+
+[[Ch02_TerasolunaBatchArch_Overview]]
+== Overview
+Overall architecture of {batch5_fullname} is explained.
+
+In {batch5_fullname}, as described in <<Ch02_GeneralBatchProcessing.adoc#Ch02_GeneralBatchProcess,"General batch processing system">>, it is implemented
+by using OSS combination focused on {SB}.
+
+A configuration schematic diagram of {batch5_fullname} including hierarchy architecture of {SB} is shown below.
+
+.Configuration schematic diagram of {batch5_fullname}
+image::Ch02_TerasolunaBatchArchitecture_Stack.png[{batch5_fullname} Stack]
+
+.Description of hierarchy architecture of {SB}
+Business Application::
+  All job definitions and business logic written by developers.
+spring batch core::
+ A core runtime class required to start and control batch jobs offered by {SB}.
+spring batch infrastructure::
+ Implementation of general ItemReader/ItemProcessor/ItemWriter offered by {SB} which are used by developers and core framework itself.
+
+[[Ch02_TerasolunaBatchArch_JobComponents]]
+== Structural elements of job
+A configuration schematic diagram of jobs is shown below in order to explain structural elements of the job.
+
+.Configuration schematic diagram of job
+image::Ch02_TerasolunaBatchArchitecture_JobComponents.png[Job Components]
+
+This section also talks about guidelines which should be finely configured for job and step.
+
+[[Ch02_TerasolunaBatchArch_Overview_Job]]
+=== Job
+A job is an entity that encapsulates entire batch process and is a container for storing steps. +
+A job can consist of one or more steps.
+
+A job is defined in the Bean definition file by using XML.
+Multiple jobs can be defined in the job definition file, however, managing jobs tend to become complex.
+
+Hence, {batch5_fullname} uses following guidelines.
+
+icon:tags[] 1 job = 1 job definition file
+
+[[Ch02_TerasolunaBatchArch_Overview_Step]]
+=== Step
+Step defines information required for controlling a batch process.
+A chunk model and a tasket model can be defined in the step.
+
+Chunk model::
+  * It is configured by ItemReader, ItemProcessor and ItemWriter.
+Tasket model::
+  * It is configured only by Tasklet.
+
+As given in <<Ch02_GeneralBatchProcessing.adoc#Ch02_GeneralBatchProcess_Considerations,"Rules and precautions to be considered in batch processing">>,
+it is necessary to simplify as much as possible and avoid complex logical structures in a single batch process.
+
+Hence, {batch5_fullname} uses following guidelines.
+
+icon:tags[] 1 step = 1 batch process = 1 business logic
+
+[NOTE]
+.Distribution of business logic in chunk model
+====
+If a single business logic is complex and large-scale, the business logic is divided into units.
+As clear from the schematic diagram, since only one ItemProcessor can be set in 1 step, it looks like the division of business logic is not possible.
+However, since CompositeItemProcssor which is an ItemProcessor consisting of multiple ItemProcessors exist,
+the business logic can be divided and executed by using this implementation.
+====
+
+[[Ch02_TerasolunaBatchArch_StepImpl]]
+== How to implement Step
+
+[[Ch02_TerasolunaBatchArch_StepImpl_ChunkOriented]]
+=== Chunk model
+Definition of chunk model and purpose of use are explained.
+
+Definition::
+  ItemReader, ItemProcessor and ItemWriter implementation and number of chunks are set in ChunkOrientedTasklet. Respective roles are explained.
+
+  * ChunkOrientedTasklet...Call ItemReader/ItemProcessor and create a chunk. Pass created chunk to ItemWriter.
+  * ItemReader...Read input data.
+  * ItemProcessor...Process read data.
+  * ItemWriter...Output processed data in chunk units.
+::
+  For overview of chunk model, refer <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch_Detail_BusinessLogic_Chunk,"Chunk model">>.
+
+[source,xml]
+.How to set a job in chunk model
+----
+<batch:job id="exampleJob">
+    <batch:step id="exampleStep">
+        <batch:tasklet>
+            <batch:chunk reader="reader"
+                         processor="processor"
+                         writer="writer"
+                         commit-interval="100" />
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+Purpose of use::
+  Since it handles a certain amount of data collectively, it is used while handling a large amount of data.
+
+[[Ch02_TerasolunaBatchArch_StepImpl_TaskletOriented]]
+=== Tasket model
+Definition of tasket model and purpose of use are explained.
+
+Definition::
+  Only Tasklet implementation is set. +
+  For overview of Tasket model, refer <<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch_Detail_BusinessLogic_Tasklet,"Tasket model">>.
+
+[source,xml]
+.How to set a job in Tasket model
+----
+<batch:job id="exampleJob">
+    <batch:step id="exampleStep">
+        <batch:tasklet ref="myTasklet">
+    </batch:step>
+</batch:job>
+----
+
+Purpose of use::
+  It can be used for executing a process which is not associated with I/O like execution of system commands etc. +
+  Further, it can also be used while committing the data in batches.
+
+
+[[Ch02_TerasolunaBatchArch_StepImpl_diffOfChunkAndTasklet]]
+=== Function difference between chunk model and Tasket model
+Explanation is given for the function difference between chunk model and Tasket model.
+Here, only outline is given. Refer section for each function for details.
+
+[cols="20,40,40", options="header"]
+.List of function differences
+|===
+|Function
+|Chunk model
+|Tasket model
+
+|Structural elements
+|Configured by ItemReader/ItemProcessor/ItemWriter/ChunkOrientedTasklet.
+|Configured only by Takslet.
+
+|Transaction
+|A transaction is generated in a chunk unit.
+|Processed in 1 transaction.
+
+|Recommended reprocessing method
+|Re-run and re-start can be used.
+|As a rule, only re-run is used.
+
+|Exception handling
+|Handling process becomes easier by using a listener. Individual implementation is also possible.
+|Individual implementation is required.
+
+|===
+
+
+[[Ch02_TerasolunaBatchArch_LaunchMethod]]
+== Running a job method
+Running a job method is explained. This contains following.
+
+* <<Ch02_TerasolunaBatchArch_LaunchMethod_Sync>>
+* <<Ch02_TerasolunaBatchArch_LaunchMethod_Async>>
+
+Respective methods are explained.
+
+[[Ch02_TerasolunaBatchArch_LaunchMethod_Sync]]
+=== Synchronous execution method
+Synchronous execution method is an execution method wherein the control is not given back to the boot source from job start to job completion.
+
+A schematic diagram which starts a job from job scheduler is shown.
+
+.Schematic diagram for synchronous execution
+image::Ch02_TerasolunaBatchArchitecture_SynchronizedExec.png[Synchronized Execution]
+
+. Start a shell script to run a job from job scheduler. +
+Job scheduler waits until the exit code (numeric value) is returned.
+. Start ``CommandLineJobRunner`` to run a job from shell script. +
+Shell script waits until ``CommandLineJobRunner`` returns an exit code (numeric value).
+. ``CommandLineJobRunner`` runs a job. Job returns an exit code (string) to ``CommandLineJobRunner`` after processing is completed. +
+``CommandLineJobRunner`` converts exit code (string) returned from the job to exit code (numeric value) and returns it to the shell script.
+
+
+[[Ch02_TerasolunaBatchArch_LaunchMethod_Async]]
+=== Asynchronous execution method
+Asynchronous execution method is an execution method wherein the control is given back to boot source immediately after running a job, by executing a job on a different execution base than boot source (a separate thread etc).
+In this method, it is necessary to fetch job execution results by a means different from that of running a job.
+
+Following 2 methods are explained in {batch5_fullname}.
+
+* <<Ch02_TerasolunaBatchArch_LaunchMethod_Async_DB>>
+* <<Ch02_TerasolunaBatchArch_LaunchMethod_Async_Web>>
+
+[NOTE]
+.Other asynchronous execution methods
+====
+Asynchronous execution can also be performed by using messages like MQ, however since the job execution points are identical, description will be omitted in {batch5_fullname}.
+====
+
+[[Ch02_TerasolunaBatchArch_LaunchMethod_Async_DB]]
+==== Asynchronous execution method (DB polling)
+<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB,"Asynchronous execution (DB polling)">> is a method wherein
+a job execution request is registered in the database, polling of the request is done and job is executed.
+
+{batch5_fullname} supports DB polling function. The schematic diagram of start by DB polling offered is shown.
+
+.DB polling schematic diagram
+image::Ch02_TerasolunaBatchArchitecture_ASynchronized_DBPolling.png[DB Polling]
+
+. User registers a job request to the database.
+. DB polling function periodically monitors the registration of the job request and executes the corresponding job when the registration is detected.
+** Run the job from SimpleJobOperator and receive ``JobExecutionId`` after completion of the job.
+** JobExecutionId is an ID which uniquely identifies job execution and execution results are browsed from JobRepository by using this ID.
+** Job execution results are registered in JobRepository by using {SB} system.
+** DB polling is itself executed asynchronously.
+. DB polling function updates JobExecutionId returned from SimpleJobOperator and the job request that started the status.
+. Job process progress and results are referred separately by using JobExecutionId.
+
+[[Ch02_TerasolunaBatchArch_LaunchMethod_Async_Web]]
+==== Asynchronous execution method (Web container)
+<<Ch04_AsyncJobWithWebContainer.adoc#Ch04_AsyncJobWithWeb,"Asynchronous execution (Web container)">> is a method
+wherein a job is executed asynchronously using the request sent to web application on the web container as a trigger.*
+A Web application can return a response immediately after starting without waiting for the job to end.
+
+.Web container schematic diagram
+image::Ch02_TerasolunaBatchArchitecture_ASynchronized_WebContainer.png[Web Container]
+
+. Send a request from a client to Web application.
+. Web application asynchronously executes the job requested from a request.
+** Receive ``JobExecutionId` immediately after starting a job from SimpleJobOperator.
+** Job execution results are registered in JobRepository by using {SB} system.
+. Web application returns a response to the client without waiting for the job to end.
+. Job process progress and results are browsed separately by using JobExecutionId.
+
+Further, it can also be linked with Web application configured by {server5_url}/[{server5_fullname}].
+
+[[Ch02_TerasolunaBatchArch_DecisionPoints]]
+== Points to consider while using
+Points to consider while using {batch5_fullname} are shown.
+
+Running a job method::
+  <<Ch02_TerasolunaBatchArch_LaunchMethod_Sync>>:::
+    It is used when job is run as per schedule and batch processing is carried out by combining multiple jobs.
+
+  <<Ch02_TerasolunaBatchArch_LaunchMethod_Async_DB>>:::
+    It is used in delayed processing, continuous execution of jobs with a short processing time, aggregation of large quantity of jobs.
+
+  <<Ch02_TerasolunaBatchArch_LaunchMethod_Async_Web>>:::
+    Similar to DB polling, however it is used when an immediate action is required for the startup.
+
+Implementation method::
+  <<Ch02_TerasolunaBatchArch_StepImpl_ChunkOriented>>:::
+    It is used when a large quantity of data is to be processed efficiently.
+
+  <<Ch02_TerasolunaBatchArch_StepImpl_TaskletOriented>>:::
+    It is used for simple processing, processing that is difficult to standardize and for the processes wherein data is to be processed collectively.

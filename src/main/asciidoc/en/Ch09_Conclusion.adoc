@@ -1,0 +1,22 @@
+include::_include_all.adoc[]
+
+[[Ch09_Conclusion]]
+= Conclusion
+
+We will learn following contents in this tutorial.
+
+How to implement a basic batch job using {batch5_shortname}
+
+* <<Ch09_DBAccessJob.adoc#Ch09_DBAccessJob, A job that performs data input and output by accessing a database>>
+
+* <<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob, A job that performs data input and output by accessing a file>>
+
+* <<Ch09_ValidationJob.adoc#Ch09_ValidationJob, A job that validates input data>>
+
+* <<Ch09_ExceptionHandlingWithListenerJob.adoc#Ch09_ExceptionHandlingWithListenerJob, A job that performs exception handling by ChunkListener>>
+
+* <<Ch09_ExceptionHandlingWithTryCatchJob.adoc#Ch09_ExceptionHandlingWithTryCatchJob, A job that performs exception handling by try-catch>>
+
+* <<Ch09_AsyncExecutionJob.adoc#Ch09_AsyncExecutionJob, A job that executes asynchronously>>
+
+Note that, {batch5_shortname} should be used and the guidelines mentioned in <<Ch99_SummaryOfPoints.adoc#Ch99_SummaryOfPoints_AboutThis, Precautions while using>> should be followed while developing a batch application.

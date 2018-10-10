@@ -1,0 +1,10 @@
+How To Use	How to use
+How To Extends	How to extends
+Chunk model	chunk model
+Tasklet model	tasklet model
+batch commit	single commit
+perpetuate	persist
+generate	be thrown
+number of chunks	chunk size
+external key	foreign key
+Job request table	Job-request-table

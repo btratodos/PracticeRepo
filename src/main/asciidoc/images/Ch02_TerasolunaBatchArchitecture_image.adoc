@@ -1,0 +1,12 @@
+= Image of TERASOLUNA Batch Stack
+== Images
+
+ditaa::ch02/TerasolunaBatchArchitecture/Ch02_TerasolunaBatchArchitecture_Stack.txt[]
+
+ditaa::ch02/TerasolunaBatchArchitecture/Ch02_TerasolunaBatchArchitecture_JobComponents.txt[]
+
+ditaa::ch02/TerasolunaBatchArchitecture/Ch02_TerasolunaBatchArchitecture_SynchronizedExec.txt[]
+
+ditaa::ch02/TerasolunaBatchArchitecture/Ch02_TerasolunaBatchArchitecture_ASynchronized_DBPolling.txt[]
+
+ditaa::ch02/TerasolunaBatchArchitecture/Ch02_TerasolunaBatchArchitecture_ASynchronized_WebContainer.txt[]

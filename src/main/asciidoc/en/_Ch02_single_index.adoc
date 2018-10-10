@@ -1,0 +1,22 @@
+[[Ch02]]
+= TERASOLUNA Batch Framework for Java (5.x) concept
+include::_include_all.adoc[]
+
+// Go down a level further to link documents starting from section
+:leveloffset: +1
+
+include::Ch02_GeneralBatchProcessing.adoc[]
+
+<<<
+
+include::Ch02_TerasolunaBatchStack.adoc[]
+
+<<<
+
+include::Ch02_SpringBatchArchitecture.adoc[]
+
+<<<
+
+include::Ch02_TerasolunaBatchArchitecture.adoc[]
+
+:leveloffset: -1

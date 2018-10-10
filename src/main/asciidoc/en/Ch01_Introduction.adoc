@@ -1,0 +1,211 @@
+include::_include_all.adoc[]
+
+[[Ch01_Intro]]
+= Introduction
+
+[[Ch01_Goal]]
+== Goal of guideline
+
+This guideline provides best practices to develop high maintainability Batch applications
+using full stack framework focusing on Spring Framework, {SB} and MyBatis.
+
+This guideline helps to proceed with the software development (mainly coding) smoothly.
+
+[[Ch01_TargetReaders]]
+== Target readers
+
+This guideline is written for architects and programmers having software development experience
+and knowledge of the following.
+
+* Basic knowledge of DI and AOP of Spring Framework
+* Application development experience using Java
+* Knowledge of SQL
+* Have experiences on using Maven
+
+This guideline is not for beginners.
+
+In order to check whether one has enough basic knowledge to understand the document,
+refer to
+{server5_url}/Appendix/SpringComprehensionCheck.html[Spring Framework Comprehension Check]
+If one is not able to answer 40% of the comprehension test, then it is recommended to study the following books separately.
+
+* http://www.shoeisha.co.jp/book/detail/9784798142470[Spring徹底入門 (翔泳社) [日本語\] ]
+* http://gihyo.jp/book/2016/978-4-7741-8217-9[［改訂新版］Spring入門――Javaフレームワーク・より良い設計とアーキテクチャ [日本語\]]
+* http://www.apress.com/9781430261513[Pro Spring 4th Edition (Apress)]
+
+[[Ch01_Structure]]
+== Structure of guideline
+
+The most important thing is that the guideline is considered as the subset of
+{server5_url}/index.html[TERASOLUNA Server Framework for Java (5.x) Development Guideline]
+(hereafter, referred to as {server5_guide}).
+By using {server5_guide}, you can eliminate duplication in explanation and reduce the cost of learning as much as possible.
+Since it indicates reference to {server5_guide} everywhere, we would like you to proceed with the development by using both guides.
+
+ifeval::["{docname}" != "single_index"]
+
+<<Ch02_index.adoc#Ch02,{batch5_fullname} concept>>::
+  Explains the basic concept of batch processing and the basic concept of {batch5_fullname} and the overview of {SB}.
+
+<<Ch03_index.adoc#Ch03,Methodology of application development>>::
+  Explains the knowledge and method to be kept in mind while developing an application using {batch5_fullname}.
+
+<<Ch04_index.adoc#Ch04,Running a Job>>::
+  Explains how to running a job as Synchronous, Asynchronous and provide job parameters.
+
+<<Ch05_index.adoc#Ch05,Input/output of data>>::
+  Explains how to provide Input/Output to various resources such as Database, File access etc.
+
+<<Ch06_index.adoc#Ch06,Handling for abnormal condition>>::
+  Explains how to handle the abnormal conditions like Input checks, Exceptions.
+
+<<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>>::
+  Explains how to manage the Job execution.
+
+<<Ch08_index.adoc#Ch08,Flow control and parallel/multiple processing>>::
+  Explains the processing of parallel/multiple Job execution.
+
+<<Ch09_index.adoc#Ch09,Tutorial>>::
+  Experience batch application development with {batch5_fullname}, through basic batch application development.
+
+endif::[]
+
+ifeval::["{docname}" == "single_index"]
+
+<<Ch02,{batch5_fullname}concept>>::
+  Explains the basic concept of batch processing and the basic concept of {batch5_fullname} and the overview of {SB}.
+
+<<Ch03,Methodology of application development>>::
+  Explains the knowledge and method to be kept in mind while developing an application using {batch5_fullname}.
+
+<<Ch04,Running a Job>>::
+  Explains how to running a job as Synchronous, Asynchronous and provide job parameters.
+
+<<Ch05,Input/output of data>>::
+  Explains how to provide Input/Output to various resources such as Database, File access etc.
+
+<<Ch06,Handling for abnormal condition>>::
+  Explains how to handle the abnormal conditions like Input checks, Exceptions.
+
+<<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>>::
+  Explains how to manage the Job execution.
+
+<<Ch08,Flow control and parallel/multiple processing>>::
+  Explains the processing of parallel/multiple Job execution.
+
+<<Ch09,Tutorial>>::
+  Experience batch application development with {batch5_fullname}, through basic batch application development.
+
+endif::[]
+
+[[Ch01_HowToReadGuide]]
+== How to read guideline
+
+ifeval::["{docname}" != "single_index"]
+
+It is strongly recommended for all the developers to read the following contents for using {batch5_fullname}.
+
+* <<Ch02_index.adoc#Ch02,{batch5_fullname}concept>>
+* <<Ch03_index.adoc#Ch03,Methodology of application development>>
+
+The following contents usually required, so you should read in advance.
+It is better to select according to the development feature of the job.
+
+* <<Ch04_index.adoc#Ch04,Running a Job>>
+* <<Ch05_index.adoc#Ch05,Input/output of data>>
+* <<Ch06_index.adoc#Ch06,Handling for abnormal condition>>
+* <<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>>
+
+Refer to the following contents for the first time when proceeding advanced implementation.
+
+* <<Ch08_index.adoc#Ch08,Flow control and parallel/multiple processing>>
+
+Developers who want to experience actual application development by using {batch5_fullname} are recommended to read following contents.
+While experiencing {batch5_fullname} for the first time, you should read these contents first and then move on to other contents.
+
+* <<Ch09_index.adoc#Ch09,Tutorial>>
+
+endif::[]
+
+ifeval::["{docname}" == "single_index"]
+
+It is strongly recommended for all the developers to read the following contents for using {batch5_fullname}.
+
+* <<Ch02,{batch5_fullname} concept>>
+* <<Ch03,Methodology of application development>>
+
+The following contents are usually required, so they should be read in advance.
+It is better to select according to the development target.
+
+* <<Ch04,Start of job>>
+* <<Ch05,Input/output of data>>
+* <<Ch06,Support for abnormal system>>
+* <<Ch07_JobManagement.adoc#Ch07_JobManagement,Job management>>
+
+Refer to the following contents for the first time when proceeding with the implementation.
+
+* <<Ch08,Flow control and parallel/multiple processing>>
+
+Developers who want to experience actual application development by using {batch5_fullname} are recommended to read following contents.
+While experiencing {batch5_fullname} for the first time, you should read these contents first and then move on to other contents.
+
+* <<Ch09,Tutorial>>
+
+endif::[]
+
+[[Ch01_representation]]
+=== Notations in guideline
+This section describe for the notations of this guideline.
+
+About Windows command prompt and Unix terminal::
+  If command syntax in Windows and Unix are different, it describe both.
+  Otherwise, standardize the notations of Unix.
+
+  Prompt sign:::
+    Describe as ``$`` in Unix.
+
+[source,console]
+.Prompt notation example
+----
+$ java -version
+----
+
+About defining properties and constructor of Bean definition::
+  In this guideline, it is described by using namespace of ``p`` and ``c``.
+  The use of namespace helps in simplifying and clarifying the description of Bean definition.
+
+[source,xml]
+.Description wherein namespace is used
+----
+<bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+    <property name="lineTokenizer">
+        <bean class="org.terasoluna.batch.item.file.transform.FixedByteLengthLineTokenizer"
+              c:ranges="1-6, 7-10, 11-12, 13-22, 23-32"
+              c:charset="MS932"
+              p:names="branchId,year,month,customerId,amount"/>
+    </property>
+</bean>
+----
+
+For your reference, the description not using namespace is shown.
+[source,xml]
+.Description not using namespace
+----
+<bean class="org.springframework.batch.item.file.mapping.DefaultLineMapper">
+    <property name="lineTokenizer">
+        <bean class="org.terasoluna.batch.item.file.transform.FixedByteLengthLineTokenizer">
+            <constructor-arg index="0" value="1-6, 7-10, 11-12, 13-22, 23-32"/>
+            <constructor-arg index="1" value="MS932"/>
+            <property name="names" value="branchId,year,month,customerId,amount"/>
+    </property>
+</bean>
+----
+
+This guideline does not force the user to use namespace.
+We would like to consider it for simplifying the explanation.
+
+[[Ch01_TestedEnviroments]]
+== Tested environments of guideline
+
+For tested environments of contents described in this guideline,
+refer to " https://github.com/terasoluna-batch/v5-functionaltest/wiki/Tested-Environment[Tested Environment]".

@@ -1,0 +1,143 @@
+include::_include_all.adoc[]
+
+[[Ch01_ChangeLog]]
+= Change Log
+
+[cols="15,25,60", options="header"]
+|===
+|Modified on
+|Modified locations
+|Modification details
+
+|2017-09-27
+|-
+|Released 5.0.1 RELEASE version
+
+|
+|General
+|Description details modified +
+・Errors in the guideline (typing errors, simple description errors etc.) modified +
+・Design of the link on the index for header and footer modified (Management ID#196) +
+・JDK8 dependent code changed to code prior to JDK7 considering it will be used by persons who do not know JDK8 (Management ID#231)
+
+Description details added +
+・Version information added to header and footer (Management ID#196)
+
+|
+|<<Ch02_SpringBatchArchitecture.adoc#Ch02_SpringBatchArch,{SB} Architecture>>
+|Description details added +
+・Explanation about character string stored in meta data table added (Management ID#233) +
+
+Description details deleted +
+・Explanation about job parameter constraints deleted (Management ID#233)
+
+|
+|<<Ch03_CreateProject.adoc#Ch03_CreateProject, Create project>>
+|Description details modified +
+・Storage directory of Job Bean definition file of blank project changed (Management ID#161) +
+・Command execution example and output example modified to show command prompt and Bash examples respectively (Management ID#161) +
+・archetypeVersion specified while creating a project modified to 5.0.1.RELEASE (Management ID#315)
+
+|
+|<<Ch03_CreateChunkJob.adoc#Ch03_CreateChunkJob, Create chunk model job>>
+|Description details modified +
+・Explanation of id attribute of Bean definition file modified to a simple expression (Management ID#250)
+
+|
+|<<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob, Create tasklet model job>>
+|Description details modified +
+・Explanation of id attribute of Bean definition file modified to a simple expression (Management ID#250)
+
+Description details added +
+・Explanation of process units considered at the time of Tasklet implementation added (Management ID#202)
+
+|
+|<<Ch04_AsyncJobWithDB.adoc#Ch04_AsyncJobWithDB_Overview, Asynchronous execution (DB polling)>>
+|Description details modified +
+・Suffix of class name modified to Repository (Management ID#241) +
+・Explanation for job request sequence modified to the details which are not dependent on specific RDBMS products (Management ID#233)
+
+Description details added +
+・Explanation for character string which is stored in job request table added (Management ID#233) +
+・Explanation for job request acquisition SQL added (Management ID#233)
+
+|
+|<<Ch04_JobParameter.adoc#Ch04_JobParameter, Job start-up parameter>>
+|Description details modified +
+・Example for referencing parameters modified so as to enclose the character string literal with single quotes (Management ID#246)
+
+|
+|<<Ch04_Listener.adoc#Ch04_Listener, Listener>>
+|Description details modified +
+・JobExecutionListener implementation example modified to present a simpler code example (Management ID#271)
+
+Description details added +
+・Link for exception handling in ChunkListener explanation added (Management ID#194) +
+・In case of tasklet model, added precautions to the explanation where the listener is set (Management ID#194)
+
+|
+|<<Ch05_Transaction.adoc#Ch05_Transaction, Transaction control>>
+|Description details modified +
+・Code example of intermediate commit method in tasklet model modified to the example which uses jobResourcelessTransactionManager (Management ID#262)
+
+Description details added +
+・Explanation of jobResourcelessTransactionManager added to intermediate commit method in tasklet model (Management ID#262)
+
+|
+|<<Ch05_DBAccess.adoc#Ch05_DBAccess, Database access>>
+|Description details added +
+・Example to update multiple tables by using CompositeItemWriter added (Management ID#226) +
+・Notes while using Oracle JDBC in Linux environment added (Management ID#237)
+
+|
+|<<Ch05_FileAccess.adoc#Ch05_FileAccess, File access>>
+|Description details modified +
+・FlatFileItemWriter and StaxEventItemWriter property explanation modified (Management ID#198)
+
+Description details added +
+・Explanation that unintended file deletion is done by combination of FlatFileItemWriter and StaxEventItemWriter property setting is added (Management ID#198)
+
+|
+|<<Ch05_ExclusiveControl.adoc#Ch05_ExclusiveControl, Exclusive control>>
+|Description details modified +
+・Code example of pessimistic lock in chunk model modified (Management ID#204) +
+・Code example of exclusive control of file modified so as to fetch file lock before opening file for exclusion (Management ID#225)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement, Job management>>
+|Description details deleted +
+・Description related to Spring Batch Admin along with termination of Spring Batch Admin project deleted (Management ID#209)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, Customization of exit codes>>
+|Description details added +
+・Explanation for significance of exit codes added to Customization of exit codes  (Management ID#294) +
+・Code example for changing exit codes of step in tasklet model added to Customization of exit codes (Management ID#294)
+
+|
+|<<Ch07_JobManagement.adoc#Ch07_JobManagement_MessageManagement, Message management>>
+|Description details modified +
+・Bean definition of ResourceBundleMessageSource modified (Management ID#266)
+
+|
+
+ifeval::["{docname}" != "single_index"]
+
+|<<Ch09_index.adoc#Ch09,Tutorial>>
+
+endif::[]
+
+ifeval::["{docname}" == "single_index"]
+
+|<<Ch09,Tutorial>>
+
+endif::[]
+
+|New chapter added +
+・Tutorial added (Management ID#200)
+
+|2017-03-17
+|-
+|Released ``5.0.0 RELEASE`` version
+
+|===

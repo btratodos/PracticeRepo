@@ -1,0 +1,1128 @@
+include::_include_all.adoc[]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob]]
+= A job which performs exception handling by try-catch
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Prerequisite]]
+[NOTE]
+.Premise
+====
+As explained in <<Ch09_Introduction.adoc#Ch09_Introduction_HowToProceed, How to proceed in the tutorial>>,
+it is a format to add implementation of exception handling for <<Ch09_ValidationJob.adoc#Ch09_ValidationJob, jobs that validate input data>>
+Note that, various methods like try-catch or ChunkListener are used as exception handling methods. +
+However, it must be noted that the explanation is for the case wherein the implementation is added to the job which accesses the database.
+====
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview]]
+== Overview
+Create a job which performs exception handling by try-catch.
+
+Note that, since this chapter is explained based on {batch5_guide},
+refer to <<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk_ItemProcessor_TryCatchExample, a method to perform try-catch in ItemProcessor>> and
+<<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet, Exception handling in tasklet model>> for details.
+
+[NOTE]
+.Regarding significance of exit code
+====
+In this chapter, the exit codes are handled with two significances and explained respectively.
+
+* Exit codes of character strings like COMPLETED and FAILED are for jobs and steps.
+* Exit codes of numerals like 0, 255 are for Java processes.
+====
+
+Background, process overview and business specifications for <<Ch09_TutorialApplication.adoc#Ch09_TutorialApplication, Explanation of application to be created>>
+are listed below.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview_Background]]
+=== Background
+Some mass retail stores issue point cards for members. +
+Membership types include "Gold member", "Normal member" and the services are provided based on membership type. +
+As a part of the service, 100 points are added for "gold members" and 10 points are added for "normal members" at the end of the month,
+for the members who have purchased a product during that month.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview_ProcessOverview]]
+=== Process overview
+{batch5_shortname} will be using an application as a monthly batch process which adds
+points based on membership type. +
+A process to validate verification for checking whether the input data exceeds upper limit value of points is additionally implemented.
+At the time of error, a warning message will be the output and it will be skipped and the process is continued. . At that time, an exit code which indicates the skipping, is output.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview_BusinessSpecification]]
+=== Business specifications
+Business specifications are as below.
+
+* Check whether the input data points exceed 1,000,000 points
+** When an error occurs during checking, a warning message log is output, target record is skipped and process will continue
+** When it is skipped, exit code is changed to "200" (SKIPPED) to indicate that the record is skipped
+* When the product purchasing flag is "1"(process target), points are added based on membership type
+** Add 100 points when membership type is "G"(gold member) and add 10 points when membership type is "N"(Normal member)
+* Product purchasing flag is updated to "0" (initial status) after adding points
+* Upper limit of points is 1,000,000 points
+* If the points exceed 1,000,000 after adding points, they are adjusted to 1,000,000 points.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview_TableSpecification]]
+=== Table specifications
+Specifications of member information table acting as an input and output resource are shown below. +
+Since it acts as an explanation for the job which accesses the database as per <<Ch09_ExceptionHandlingWithTryCatchJob_Prerequisite>>,
+refer <<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob_Overview_FileSpecification, File specifications>> for resource specifications of input and output in case of a job accessing the file.
+
+[cols="3,15,10,4,12,8,45", options="header"]
+.Member information table (member_info)
+|===
+|No
+|Attribute name
+|Column name
+|PK
+|Data type
+|Number of digits
+|Expana
+
+|1
+|Member ID
+|id
+|icon:check[]
+|CHAR
+|8
+|Indicates a fixed 8 digit number which uniquely identifies a member.
+
+|2
+|Membership type
+|type
+|-
+|CHAR
+|1
+|Membership types are as shown below. +
+"G"(Gold member), "N"(Normal member)
+
+|3
+|Product purchasing flag
+|status
+|-
+|CHAR
+|1
+|Indicates whether you have purchased a product within the month. +
+When the product is purchased, it is updated to "1"(process target) and to "0"(initial status) during monthly batch processing.
+
+|4
+|Point
+|point
+|-
+|INT
+|7
+|Indicates points retained by the member. +
+Initial value is 0.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Overview_JobOverview]]
+=== Job overview
+Process flow and process sequence are shown below in order to understand 
+the overview of the job which performs input check created here.
+
+Since it acts as an explanation for the job which accesses database as per <<Ch09_ExceptionHandlingWithTryCatchJob_Prerequisite>>,
+it must be noted that parts different from that of process flow and process sequence in the case of a job accessing file exist.
+
+//^
+Process flow overview::
+Process flow overview is shown below.
+
+.Process flow for the job which performs exception handling
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_ProcessFlow.png[ProcessFlow of ExceptionHandlingWithTryCatch Job]
+
+//^
+Process sequence in case of a chunk model::
+Process sequence in case of a chunk model is explained. +
+Since this job is explained assuming the usage of abnormal data,
+the sequence diagram indicates that error (termination with warning) has occurred during input check.
+
+Orange object indicates a class to be implemented at that time.
+
+.Sequence diagram of chunk model
+image::Ch09_ExceptionHandlingWithTryCatchJob_ProcessSequence_ChunkModel.png[ProcessSequence of ExceptionHandlingWithTryCatch Job by ChunkModel]
+
+.Explanation of sequence diagram
+. A step is executed from the job.
+. Step opens a resource.
+. ``MyBatisCursorItemReader`` fetches all the member information (issue select statement) from member_info table.
+** Subsequent processing is repeated until the input data is exhausted.
+** Start a framework transaction in chunk units.
+** Repeat steps from 4 to 12 until the chunk size is achieved.
+. Step fetches 1 record of input data from ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` fetches 1 record of input data from member_info table.
+. member_info table returns input data to ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` returns input data to step.
+. Step performs a process for input data by ``PointAddItemProcessor``.
+. ``PointAddItemProcessor`` requests input check process to ``SpringValidator``.
+. ``SpringValidator`` performs input check based on input check rules and throws an exception (ValidationException) in case of a check error.
+. ``PointAddItemProcessor`` reads input data and adds points. Returns null when an exception (ValidationException) is captured and skip error record.
+. ``PointAddItemProcessor`` returns process results to the step.
+. Step outputs chunk size data by ``MyBatisBatchItemWriter``.
+. ``MyBatisBatchItemWriter`` updates member information (issue update statement) for member_info table.
+. Step commits a framework transaction.
+. Step executes ``ExitStatusChangeListener``.
+. ``ExitStatusChangeListener`` sets ``SKIPPED`` as individual exit codes in ``StepExecution`` when input and output data records are different.
+. Step returns exit code (here successful termination: 0) to job.
+. Job executes ``JobExitCodeChangeListener``.
+. ``JobExitCodeChangeListener`` fetches exit code from ``StepExecution``.
+. ``StepExecution`` returns exit code to ``JobExitCodeChangeListener``.
+. ``JobExitCodeChangeListener`` returns ``SKIPPED`` (here termination with warning: 200) to job, as an exit code for the final job.
+
+//^
+Process sequence in case of a tasklet model::
+A process sequence in case of a tasklet model is explained. +
+Since the job is explained assuming usage of abnormal data,
+The sequence diagram shows a case wherein an error occurs (termination with warning) in the input check.
+
+Orange object indicates a class to be implemented at that time.
+
+.Process sequence diagram of tasklet model
+image::Ch09_ExceptionHandlingWithTryCatchJob_ProcessSequence_TaskletModel.png[ProcessSequence of ExceptionHandlingWithTryCatch Job by TaskletModel]
+
+.Explanation of sequence diagram
+. A step is executed from the job.
+** Step starts a framework transaction.
+. Step executes ``PointAddTasklet``.
+. ``PointAddTasklet`` opens a resource.
+. ``MyBatisCursorItemReader`` fetches all the member information (issue select statement) from member_info table.
+** Repeat steps from 5 to 13 until input data is exhausted.
+** Repeat the process from 5 to 11 until a fixed number of records is reached.
+. ``PointAddTasklet`` fetches 1 record of input data from ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` fetches 1 record of input data from member_info table.
+. member_info table returns input data to ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` returns input data to tasklet.
+. ``PointAddTasklet`` requests input check process to ``SpringValidator``.
+. ``SpringValidator`` performs input check based on input check rules and throws an exception (ValidationException) in case of a check error.
+. ``PointAddTasklet`` reads input data and adds points. Continue the process by "continue" when an exception (ValidationException) is cached and skip the error record.
+** Continue the process from 5 without performing subsequent processes when the record is skipped.
+. ``PointAddTasklet`` outputs a certain number of records by ``MyBatisBatchItemWriter``.
+. ``MyBatisBatchItemWriter`` updates member information (issue update statement) for member_info table.
+. ``PointAddTasklet`` sets ``SKIPPED`` as an individual exit code in ``StepExecution``.
+. ``PointAddTasklet`` returns process termination to step.
+. Step commits a framework transaction.
+. Step returns exit code (here, successful termination: 0) to the job.
+. Step executes ``JobExitCodeChangeListener``.
+. ``JobExitCodeChangeListener`` fetches exit code from ``StepExecution``.
+. ``StepExecution`` returns exit code to ``JobExitCodeChangeListener``.
+. Step returns exit code (here, termination with warning: 200) to the job.
+
+[NOTE]
+.About implementation of skipping using a process model
+====
+Skip process is implemented differently in the chunk model and tasklet model.
+
+Chunk model::
+Implement try-catch in ItemProcessor and skip error data by returning null in catch block.
+For skipping in ItemReader and ItemWriter, refer <<Ch06_ExceptionHandling.adoc#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Skip, Skip>>.
+
+Tasklet model::
+Implement try-catch in business logic and skip error data by continuing the process in catch block by using "continue".
+====
+
+Respective implementation methods for chunk model and tasklet model are explained subsequently.
+
+* <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk>>
+* <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet>>
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk]]
+== Implementation in chunk model
+Implement processes from creation to execution of job which performs input check in the chunk model, by the following procedure.
+
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_MessageDefinition>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Coding>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution>>
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_MessageDefinition]]
+=== Adding message definition
+Log message uses message definition and is used at the time of log output to make it easier 
+to design prevention of variations in the code system and extraction of keyword to be monitored.
+
+Since it is used as common in the chunk model / tasklet model, it can be skipped if created already.
+
+Set ``application-messages.properties`` and ``launch-context.xml`` as shown below. +
+``launch-context.xml`` is already configured in {batch5_shortname}.
+
+[source, xml]
+.src/main/resources/i18n/application-messages.properties
+----
+# (1)
+errors.maxInteger=The {0} exceeds {1}.
+----
+
+[source, xml]
+.src/main/resources/META-INF/spring/launch-context.xml
+----
+<!-- omitted -->
+
+<bean id="messageSource" class="org.springframework.context.support.ResourceBundleMessageSource"
+      p:basenames="i18n/application-messages" /> <!-- (2) -->
+
+<!-- omitted -->
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set the message to be output when the upper limit of points is exceeded. +
+Assign item name to {0) and upper limit value to {1}.
+
+|(2)
+|Set ``MessageSource`` to use the message from the properties file. +
+Specify storage location of property file in ``basenames``.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode]]
+=== Customising exit codes
+Customise exit codes of Java process at the end of job. +
+For details, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, Customising exit codes>>.
+
+Implement following operations
+
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_StepExecutionListener>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_JobExecutionListener>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_Bean>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_Context>>
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_StepExecutionListener]]
+==== Implementation of StepExecutionListener
+Use ``StepExecutionListener`` interface to change the exit code of step based on the condition. +
+Here, implement a process to change exit code to ``SKIPPED`` when input data and output data records are different
+as an implementation class of ``StepExecutionListener`` interface.
+
+Note that, it is not necessary to create this class in the tasklet model
+since in Tasklet model, individual exit codes can be set in ``StepExecution`` class in Tasklet implementation class.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.listener.ExitStatusChangeListener
+----
+package org.terasoluna.batch.tutorial.common.listener;
+
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ExitStatusChangeListener implements StepExecutionListener {
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        // do nothing.
+    }
+
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        ExitStatus exitStatus = stepExecution.getExitStatus();
+        if (conditionalCheck(stepExecution)) {
+            exitStatus = new ExitStatus("SKIPPED"); // (1)
+        }
+        return exitStatus;
+    }
+
+    private boolean conditionalCheck(StepExecution stepExecution) {
+        return (stepExecution.getWriteCount() != stepExecution.getReadCount()); // (2)
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set unique individual exit code according to execution results of skip. +
+Here, specify ``SKIPPED`` as an exit code at the time of skipping a record.
+
+|(2)
+|Compare records of input data and output data to determine the record has been skipped. +
+As records of input data and output data vary when a record is skipped, process of skipping is determined by using difference in records.
+(1) is executed when the records show variation.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_JobExecutionListener]]
+==== Implementation of JobExecutionListener
+Use ``JobExecutionListener`` interface and change exit codes of job based on conditions. +
+Here, implement a process to change exit code of final job in accordance with exit code of each step,
+as an implementation class of ``JobExecutionListener`` interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.listener.JobExitCodeChangeListener
+----
+package org.terasoluna.batch.tutorial.common.listener;
+
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.stereotype.Component;
+
+import java.util.Collection;
+
+@Component
+public class JobExitCodeChangeListener implements JobExecutionListener {
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        // do nothing.
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        Collection<StepExecution> stepExecutions = jobExecution.getStepExecutions();
+        for (StepExecution stepExecution : stepExecutions) { // (1)
+            if ("SKIPPED".equals(stepExecution.getExitStatus().getExitCode())) {
+                jobExecution.setExitStatus(new ExitStatus("SKIPPED"));
+                break;
+            }
+        }
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set exit code of final job in ``JobExecution`` according to execution results of job. +
+If the one of the exit codes returned from the step contains ``SKIPPED``, exit code is considered as 
+considered as ``SKIPPED``.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_Bean]]
+==== Configuring Job Bean definition file
+Configuration of job Bean definition file for using the created listener is shown below.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <!-- omitted -->
+    
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.chunk,
+            org.terasoluna.batch.tutorial.common.listener"/> <!-- (1) -->
+    
+    <!-- omitted -->
+
+    <batch:job id="jobPointAddChunk" job-repository="jobRepository">
+        <batch:step id="jobPointAddChunk.step01">
+            <batch:tasklet transaction-manager="jobTransactionManager">
+                <batch:chunk reader="reader"
+                             processor="pointAddItemProcessor"
+                             writer="writer" commit-interval="10"/>
+            </batch:tasklet>
+            <batch:listeners>
+                <batch:listener ref="exitStatusChangeListener"/> <!-- (2) -->
+            </batch:listeners>
+        </batch:step>
+        <batch:listeners>
+            <batch:listener ref="jobExitCodeChangeListener"/> <!-- (3) -->
+        </batch:listeners>
+    </batch:job>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure the base package subjected to component scanning. +
+Specify additional packages containing implementation class of ``StepExecutionListener`` and ``JobExecutionListener``, in ``base-package`` attribute.
+
+|(2)
+|Configure implementation class of ``StepExecutionListener``.
+Note that, ``StepExecutionListener`` is an extended interface of ``StepListener``. +
+Here, specify ``exitStatusChangeListener`` - a Bean ID of implementation class of ``StepExecutionListener``.
+
+|(3)
+|Configure implementation class of ``JobExecutionListener``. +
+Here, specify ``jobExitCodeChangeListener`` - a Bean ID of implementation class of ``JobExecutionListener``.
+
+|===
+
+[WARNING]
+.Difference in configuration locations of ExitStatusChangeListener and JobExitCodeChangeListener
+====
+Since ``ExitStatusChangeListener`` attributes to ``StepListener`` which can interrupt the process before and after the execution of step, configure in ``<batch:tasklet>`` tag by using ``<batch:listeners>`` or ``<batch:listener>`` tag. +
+Since ``JobExitCodeChangeListener`` attributes to ``JobListener`` which can interrupt the process before and after the execution of job, configure in ``<batch:job>`` tag by using ``<batch:listeners>`` or ``<batch:listener>`` tag.
+
+For details, refer <<Ch04_Listener.adoc#Ch04_Listener_HowToUse_Configuration, Listener configuration>>.
+====
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_ExitCode_Context]]
+==== Mapping definition of exit codes
+Add mapping of exit codes.
+
+Add a unique exit code in ``launch-context.xml`` as shown below.
+
+[source, xml]
+.src/main/resources/META-INF/spring/launch-context.xml
+----
+<!-- omitted -->
+
+<bean id="exitCodeMapper" class="org.springframework.batch.core.launch.support.SimpleJvmExitCodeMapper">
+    <property name="mapping">
+        <util:map id="exitCodeMapper" key-type="java.lang.String"
+                  value-type="java.lang.Integer">
+            <!-- ExitStatus -->
+            <entry key="NOOP" value="0" />
+            <entry key="COMPLETED" value="0" />
+            <entry key="STOPPED" value="255" />
+            <entry key="FAILED" value="255" />
+            <entry key="UNKNOWN" value="255" />
+            <entry key="SKIPPED" value="200" /> <!-- (1) -->
+        </util:map>
+    </property>
+</bean>
+
+<!-- omitted -->
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Add a unique exit code. +
+Specify ``SKIPPED`` as a key for mapping and ``200`` as a code value.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Coding]]
+=== Implementation of exception handling
+Implement try-catch processing in business logic class which adds the points. +
+Add implementation of try-catch processing to ``PointAddItemProcessor`` class which is implemented already.
+
+As it acts as an explanation at the time of job which accesses database as shown in <<Ch09_ExceptionHandlingWithTryCatchJob_Prerequisite>>,
+only (1) to (5) are added for the implementation at the time of a job accessing the file.
+
+[source, java]
+.org.terasoluna.batch.tutorial.dbaccess.chunk.PointAddItemProcessor
+----
+// Package and the other import are omitted.
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.item.validator.ValidationException;
+import org.springframework.context.MessageSource;
+
+import java.util.Locale;
+
+@Component
+public class PointAddItemProcessor implements ItemProcessor<MemberInfoDto, MemberInfoDto> {
+    // Definition of constants are omitted.
+    
+    private static final Logger logger = LoggerFactory.getLogger(PointAddItemProcessor.class); // (1)
+
+    @Inject
+    Validator<MemberInfoDto> validator;
+
+    @Inject
+    MessageSource messageSource; // (2)
+
+    @Override
+    public MemberInfoDto process(MemberInfoDto item) throws Exception {
+        try { // (3)
+            validator.validate(item);
+        } catch (ValidationException e) {
+            logger.warn(messageSource
+                    .getMessage("errors.maxInteger", new String[] { "point", "1000000" }, Locale.getDefault())); // (4)
+            return null; // (5)
+        }
+
+        // The other codes of bussiness logic are omitted.
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define an instance of ``LoggerFactory`` in order to output a log.
+
+|(2)
+|Inject an instance of ``MessageSource``.
+
+|(3)
+|Implement exception handling. +
+Enclose input check process by try-catch and handle ``ValidationException``.
+
+|(4)
+|Fetch a message with message ID ``errors.maxInteger`` from the property file and output in a log.
+
+|(5)
+|Return null in order to skip error code.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution]]
+=== Job execution and results verification
+Execute created job on STS and verify results.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Run]]
+==== Execute job from execution configuration
+Execute the job from execution configuration already created and verify the results.
+
+Here, the job is executed using abnormal data. +
+Since the method to change input data vary based on the resource (database or file) which handles the job of implementing exception handling,
+execute as below.
+
+//^
+When exception handling is implemented for the job which inputs or outputs data by accessing database::
+Execute the job by using execution configuration created in <<Ch09_DBAccessJob.adoc#Ch09_DBAccessJob_Chunk_Execution_Run, Execute job from execution configuration>>
+of the job which inputs or outputs data by accessing database.
+
+Comment out script of normal data and cancel comment out of abnormal data script by Database Initialize of ``batch-application.proeprties``
+in order to use abnormal data.
+
+[source, xml]
+.src/main/resources/batch-application.proeprties
+----
+# Database Initialize
+tutorial.create-table.script=file:sqls/create-member-info-table.sql
+#tutorial.insert-data.script=file:sqls/insert-member-info-data.sql
+tutorial.insert-data.script=file:sqls/insert-member-info-error-data.sql
+----
+
+//^
+When exception handling is implemented for the job which inputs or outputs data by accessing a file::
+Execute the job by using execution configuration created in <<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob_Chunk_Execution_Run, Execute job from execution configuration>>
+of the job which inputs or outputs data by accessing a file.
+
+Change input file (inputFile) path from normal system data ((insert-member-info-data.csv)) to abnormal system data (insert-member-info-error-data.csv),
+from the arguments configured by execution configuration in order to use abnormal data.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Console]]
+==== Verifying console log
+Open Console View and verify that logs of following contents are output.
+
+* Exception should not occur
+* Following message should be output as WARN log
+** "The Point exceeds 1000000."
+
+[source, console]
+.Console log output example
+----
+[2017/09/05 18:27:01] [main] [o.t.b.t.e.c.PointAddItemProcessor] [WARN ] The point exceeds 1000000.
+[2017/09/05 18:27:01] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddChunk]] completed with the following parameters: [{jsr_batch_run_id=450}] and the following status: [COMPLETED]
+[2017/09/05 18:27:01] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@2145433b: startup date [Tue Sep 05 18:26:57 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Exitcode]]
+==== Verifying exit codes
+Verify that the process has terminated with warning by using exit codes. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Confirm that exit code (exit value) is 200 (Termination with warning).
+
+.Verifying exit code
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Confirm_ExitCode_ChunkModel.png[Confirm the Exit Code of ExceptionHandlingWithTryCatchJob for ChunkModel]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Output]]
+==== Verifying output resource
+Verify output resource (database or file) by job which implements exception handling.
+
+Since skipping process is implemented, verify that the records have been updated normally
+for the records to be updated other than error records.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Output_Table]]
+===== Verifying member information table
+Verify member information table by using Data Source Explorer. +
+Compare the contents of member information table before and after update, and verify that the contents are in accordance with the verification details. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_RefDB, Refer database by using Data Source Explorer>>.
+
+Verification details::
+* All the records excluding error records (member id is "000000013")
+** status column
+*** Records with "0"(initial status) should not exist
+** point column
+*** Points are added according to membership type, for point addition
+**** 100 points when type column is "G"(gold member)
+**** 10 points when type column is "N"(normal member)
+* About error codes (member id is "000000013")
+** Should not be updated
+
+Contents of member information table before and after update are as shown below.
+
+.Details of member information table before and after update
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Result_MemberInfoTable.png[Table of member_info]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Chunk_Execution_Output_File]]
+===== Verifying member information file
+Compare input and output contents of member information file, and verify that the contents are in accordance with the verification details.
+
+Verification details::
+* Member information file should be output in the output directory
+** Output file: files/output/output-member-info-data.csv
+* About all the records excluding error records (member id is "00000013")
+** status column
+*** Records with "0"(initial status) should not exist
+** point column
+*** Points are added according to membership type, for point addition
+**** 100 points when type column is "G"(gold member)
+**** 10 points when type column is "N"(normal member)
+* Error records (member id is "00000013") should not be output
+
+Input and output details of member information file are as shown below. +
+File fields are output in the sequence of id(member id), type(membership type), status(product purchasing flag) and point(point).
+
+.Input and output details of member information file
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Result_MemberInfoFile.png[File of member_info]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet]]
+== Implementation in tasklet model
+Processes from creation to execution of job which performs input check in tasklet model are implemented by following procedure.
+
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_MessageDefinition>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Coding>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution>>
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_MessageDefinition]]
+=== Adding message definition
+Log message uses message definition and is used at the time of log output to make it easier 
+to design prevention of variations in the code system and extraction of keyword to be monitored.
+
+Since it is used in common, in the chunk model / tasklet model, it can be skipped if created already.
+
+Configure ``application-messages.properties`` and ``launch-context.xml`` as shown below. +
+``launch-context.xml`` is already configured in {batch5_shortname}.
+
+[source, xml]
+.src/main/resources/i18n/application-messages.properties
+----
+# (1)
+errors.maxInteger=The {0} exceeds {1}.
+----
+
+[source, xml]
+.src/main/resources/META-INF/spring/launch-context.xml
+----
+<!-- omitted -->
+
+<bean id="messageSource" class="org.springframework.context.support.ResourceBundleMessageSource"
+      p:basenames="i18n/application-messages" /> <!-- (2) -->
+
+<!-- omitted -->
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure a message to be output when the upper limit of points is exceeded. +
+Assign item name to {0) and upper limit value to {1}.
+
+|(2)
+|Set ``MessageSource`` to use the message from the property file. +
+Specify storage location of property file in ``basenames``.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode]]
+=== Customizing exit codes
+Customize exit codes of java process at the time of termination of a job. +
+For details, refer <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, Customize exit codes>>.
+
+Implement following operations.
+
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_JobExecutionListener>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_Bean>>
+. <<Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_Context>>
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_JobExecutionListener]]
+==== Implementation of JobExecutionListener
+Use ``JobExecutionListener`` interface and change exit codes on job based on conditions. +
+Here, implement a process to change the exit codes of the final job in accordance with exit codes of each step
+as an implementation class of ``JobExecutionListener`` interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.listener.JobExitCodeChangeListener
+----
+package org.terasoluna.batch.tutorial.common.listener;
+
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.JobExecutionListener;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.stereotype.Component;
+
+import java.util.Collection;
+
+@Component
+public class JobExitCodeChangeListener implements JobExecutionListener {
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        // do nothing.
+    }
+
+    @Override
+    public void afterJob(JobExecution jobExecution) {
+        Collection<StepExecution> stepExecutions = jobExecution.getStepExecutions();
+        for (StepExecution stepExecution : stepExecutions) { // (1)
+            if ("SKIPPED".equals(stepExecution.getExitStatus().getExitCode())) {
+                jobExecution.setExitStatus(new ExitStatus("SKIPPED"));
+                break;
+            }
+        }
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Set exit code of final job in ``JobExecution`` in accordance with the execution results of the job. +
+Here, when the exit codes returned from the step contain ``SKIPPED``,
+exit code is considered as ``SKIPPED``.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_Bean]]
+==== Configuring Job Bean definition file
+Configuration of Job Bean definition file for using created listener is shown below.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <!-- omitted -->
+    
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.tasklet,
+            org.terasoluna.batch.tutorial.common.listener"/> <!-- (1) -->
+    
+    <!-- omitted -->
+
+    <batch:job id="jobPointAddTasklet" job-repository="jobRepository">
+        <batch:step id="jobPointAddTasklet.step01">
+            <batch:tasklet transaction-manager="jobTransactionManager"
+                           ref="pointAddTasklet"/>
+        </batch:step>
+        <batch:listeners>
+            <batch:listener ref="jobExitCodeChangeListener"/> <!-- (2) -->
+        </batch:listeners>
+    </batch:job>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure a base package which is subjected to component scanning. +
+Specify additional packages containing implementation classes of ``StepExecutionListener`` and ``JobExecutionListener``, in ``base-package`` attribute.
+
+|(2)
+|Configure implementation class of ``JobExecutionListener``.
+Note that, ``JobExecutionListener`` is an extended interface of ``JobListener``. +
+Here, specify ``jobExitCodeChangeListener`` - a Bean ID of implementation class of ``JobExecutionListener``.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_ExitCode_Context]]
+==== Mapping definition of exit code
+Add mapping of exit codes.
+
+Since it is used as common in chunk model / tasklet model, it can be skipped if implemented already.
+
+Add unique exit codes to ``launch-context.xml`` as shown below.
+
+[source, xml]
+.src/main/resources/META-INF/spring/launch-context.xml
+----
+<!-- omitted -->
+
+<bean id="exitCodeMapper" class="org.springframework.batch.core.launch.support.SimpleJvmExitCodeMapper">
+    <property name="mapping">
+        <util:map id="exitCodeMapper" key-type="java.lang.String"
+                  value-type="java.lang.Integer">
+            <!-- ExitStatus -->
+            <entry key="NOOP" value="0" />
+            <entry key="COMPLETED" value="0" />
+            <entry key="STOPPED" value="255" />
+            <entry key="FAILED" value="255" />
+            <entry key="UNKNOWN" value="255" />
+            <entry key="SKIPPED" value="200" /> <!-- (1) -->
+        </util:map>
+    </property>
+</bean>
+
+<!-- omitted -->
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Add unique exit codes. +
+Specify ``SKIPPED`` to a key to be mapped and ``200`` to code value.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Coding]]
+=== Implementation of exception handling
+Implement try-catch processing in business logic class which adds the points. +
+Add implementation of try-catch process to ``PointAddItemProcessor`` class which is implemented already.
+
+Since it acts as an explanation in case of a job which accesses database as per <<Ch09_ExceptionHandlingWithTryCatchJob_Prerequisite>>,
+add only (1) to (5) for the implementation in case of a job accessing the file.
+
+[source, java]
+.org.terasoluna.batch.tutorial.dbaccess.tasklet.PointAddTasklet
+----
+// Package and the other import are omitted.
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.item.validator.ValidationException;
+import org.springframework.context.MessageSource;
+
+import java.util.Locale;
+
+@Component
+public class PointAddTasklet implements Tasklet {
+    // Definition of constans, ItemStreamReader and ItemWriter are omitted.
+    
+    private static final Logger logger = LoggerFactory.getLogger(PointAddTasklet.class); // (1)
+
+    @Inject
+    Validator<MemberInfoDto> validator;
+
+    @Inject
+    MessageSource messageSource; // (2)
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+        MemberInfoDto item = null;
+
+        List<MemberInfoDto> items = new ArrayList<>(CHUNK_SIZE);
+        int errorCount = 0; // (3)
+
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext());
+            while ((item = reader.read()) != null) {
+                try { // (4)
+                    validator.validate(item);
+                } catch (ValidationException e) {
+                    logger.warn(messageSource
+                            .getMessage("errors.maxInteger", new String[] { "point", "1000000" }, Locale.getDefault()));  // (5)
+                    errorCount++;
+                    continue; // (6)
+                }
+                
+                // The other codes of business logic are omitted.
+            }
+            
+            writer.write(items);
+        } finally {
+            reader.close();
+        }
+        if (errorCount > 0) {
+            contribution.setExitStatus(new ExitStatus("SKIPPED")); // (7)
+        }
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define an instance of ``LoggerFactory`` in order to output a log.
+
+|(2)
+|Inject an instance of ``MessageSource``.
+
+|(3)
+|Provide a counter to determine occurrence of exception. +
+Increment when ``ValidationException`` is captured.
+
+|(4)
+|Implement exception handling. +
+Enclose input check process by try-catch and handle ``ValidationException``.
+
+|(5)
+|Fetch a message with message ID ``errors.maxInteger`` from property file and output in a log.
+
+|(6)
+|Continue the process by "continue" to skip error records.
+
+|(7)
+|Configure ``SKIPPED`` as a unique exit code.
+
+|===
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution]]
+=== Job execution and results verification
+Execute created job on STS and verify results.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Run]]
+==== Execute job from execution configuration
+Execute job from execution configuration created already and verify the results.
+
+Here, execute job by using abnormal data. +
+Since how to change input data vary depending on resource (database or file) which handle job implementing exception handling,
+execute as below.
+
+//^
+When exception handling is implemented for a job which inputs or outputs data by accessing database::
+Execute job by using execution configuration created in <<Ch09_DBAccessJob.adoc#Ch09_DBAccessJob_Chunk_Execution_Run, Execute job from execution configuration>>
+of a job which inputs or outputs data by accessing database.
+
+Comment out script of normal data and cancel comment out of abnormal data script by Database Initialize of ``batch-application.proeprties``
+in order to use abnormal data.
+
+[source, xml]
+.src/main/resources/batch-application.proeprties
+----
+# Database Initialize
+tutorial.create-table.script=file:sqls/create-member-info-table.sql
+#tutorial.insert-data.script=file:sqls/insert-member-info-data.sql
+tutorial.insert-data.script=file:sqls/insert-member-info-error-data.sql
+----
+
+//^
+When exception handling is implemented for a job which inputs or outputs data by accessing a file::
+Execute job by using execution configuration created in <<Ch09_FileAccessJob.adoc#Ch09_FileAccessJob_Chunk_Execution_Run, Execute job from execution configuration>>
+of a job which inputs or outputs data by accessing a file.
+
+Change input file (inputFile) path from normal system data ((insert-member-info-data.csv)) to abnormal system data (insert-member-info-error-data.csv),
+from the arguments configured by execution configuration in order to use abnormal data
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Console]]
+==== Verifying console log
+Open Console View and verify that log of following details is output.
+
+* Exception should not occur
+* Following message should be output as a WARN log
+** "The Point exceeds 1000000."
+
+[source, console]
+.Console log output example
+----
+[2017/09/11 15:36:29] [main] [o.t.b.t.e.t.PointAddTasklet] [WARN ] The point exceeds 1000000.
+[2017/09/11 15:36:29] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddTasklet]] completed with the following parameters: [{jsr_batch_run_id=468}] and the following status: [COMPLETED]
+[2017/09/11 15:36:29] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@735f7ae5: startup date [Mon Sep 11 15:36:27 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Exitcode]]
+==== Verifying exit codes
+Verify that process is terminated with a warning, by using exit code. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Verify that exit code (exit value) is 200 (Termination with warning).
+
+.Verifying exit codes
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Confirm_ExitCode_TaskletModel.png[Confirm the Exit Code of ExceptionHandlingWithTryCatchJob for TaskletModel]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Output]]
+==== Verifying output resource
+Verify output resource (database or file) by a job which implements exception handling.
+
+Since skipping is implemented, verify that records are updated successfully, for the 
+records to be updated except for error records.
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Output_Table]]
+===== Verifying member information table
+Verify member information table by using Data Source Explorer. +
+Compare contents of member information table before and after update, and verify that the contents are in accordance with verification details. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_RefDB, Refer database by using Data Source Explorer>>.
+
+Verification details::
+* For all records excluding error records (member ID is "000000013")
+** status column
+*** Records with "0"(initial status) should not exist
+** point column
+*** Points should be added according to membership type, for point addition
+**** 100 points when type column is "G"(gold member)
+**** 10 points when type column is "N"(normal member)
+* About error records (member ID is "000000013")
+** Should not be updated
+
+Contents of member information table before and after update are as below.
+
+.Contents of member information table before and after update
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Result_MemberInfoTable.png[Table of member_info]
+
+[[Ch09_ExceptionHandlingWithTryCatchJob_Tasklet_Execution_Output_File]]
+===== Verifying member information file
+Compare contents of input and output contents of member information file and verify that the contents are in accordance with verification details.
+
+Verification contents::
+* Member information file should be output in output directory
+** Output file: files/output/output-member-info-data.csv
+* All the records excluding error records (member ID is "00000013")
+** status column
+*** Records with "0"(initial status) should not exist
+** point column
+*** Points should be added in accordance with membership type, for point addition
+**** 100 points when type column is "G"(gold member)
+**** 10 points when type column is "N"(normal member)
+* Error records (member ID is "00000013") should not be output
+
+Input and output contents of member information file are as below. +
+Fields of the file are output in the sequence of id (member ID), type (membership type), status (product purchasing flag) and point(points).
+
+.Input and output details of member information file
+image::ch09/ExceptionHandlingWithTryCatch/Ch09_ExceptionHandlingWithTryCatchJob_Result_MemberInfoFile.png[File of member_info]

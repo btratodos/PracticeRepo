@@ -1,0 +1,66 @@
+include::_include_all.adoc[]
+
+[[Ch03_ChunkOrTasklet]]
+= How to choose chunk model or tasklet model
+
+Here, how to choose chunk model and tasklet model is explained by organizing each feature.
+Refer to the following chapters which are explained in detail appropriately.
+
+Understand the following contents as examples of concepts without any constraints or recommendations.
+Refer to it while creating a job depending on the characteristics of the users and systems.
+
+The main differences between the chunk model and the tasklet model are given below.
+
+[cols="10,45,45", options="header"]
+.Comparison of chunk model and tasklet model.
+|===
+|Item
+|Chunk
+|Tasklet
+
+|Components
+|It consists of 3 components mainly ``ItemReader``, ``ItemProcessor`` and ``ItemWriter``.
+|It is consolidated in one ``Tasklet``.
+
+|Transaction
+|A certain number of records are processed by issuing intermediate commit. Batch commit cannot be done. +
+It can be processed by specific machine resources regardless of the data count. +
+If an error occurs in the midway, then unprocessed data and processed data will get mixed.
+|The data is entirely processed by batch commit. There is a need for the user to implement intermediate commit. +
+If the data to be processed is large, machine resources may get exhausted. +
+If an error occurs in the midway, only the unprocessed data is rolled back.
+
+|Restart
+|It can be restarted based on the record count.
+|It cannot be restarted based on the record count.
+
+|===
+
+Based on this, we will introduce some examples of using each one as follows.
+
+To make recovery as simple as possible::
+  When the job having error, is to be recovered by only re-running the target job,
+  tasklet model can be chooseed to make recovery simple. +
+  In chunk model, it should be dealt by returning the processed data
+  to the state before executing the job and
+  by creating a job to process only the unprocessed data.
+To consolidate the process contents::
+  When you want to prioritize the outlook of job such as 1 job in 1 class, tasklet can be chooseed.
+To process large data stably::
+  When performing batch process of 10 million records, consider to use chunk model in case the record count that influences the resources is the target.
+  It means stabilizing the process by intermediate commit.
+  Even in tasklet model, intermediate commit can be used, but it is simpler to implement in chunk model.
+To restart based on the record count for the recovery after error::
+  When batch window is difficult and you want to resume from error data onwards,
+  chunk model should be chooseed to use restart based on the record count provided by {SB}.
+  This eliminates the need to create that mechanism for each job.
+
+[IMPORTANT]
+====
+Chunk model and tasklet model are basically used in combination. +
+It is not necessary to implement only one model in all jobs in the batch system. +
+Use one model based on the characteristics of jobs of the entire system and use the other model in accordance with the situation.
+
+For example, in most cases it is to choose a tasklet model if there is a margin in the number of processesing records and processing time.
+In a very small number of cases, choosing a chunk model for jobs that process large numbers of records.
+====

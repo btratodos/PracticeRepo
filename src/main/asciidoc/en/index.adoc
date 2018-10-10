@@ -1,0 +1,26 @@
+include::_include_index.adoc[]
+include::_include_all.adoc[]
+
+= {doctitle}
+
+. <<Ch01_index.adoc#,In the Beginning>>
+
+. <<Ch02_index.adoc#,TERASOLUNA Batch Framework for Java (5.x) concept>>
+
+. <<Ch03_index.adoc#,Methodology of application development>>
+
+. <<Ch04_index.adoc#,Running a job>>
+
+. <<Ch05_index.adoc#,Input/Output of Data>>
+
+. <<Ch06_index.adoc#,Support to abnormal system>>
+
+. <<Ch07_JobManagement.adoc#,Job Management>>
+
+. <<Ch08_index.adoc#,Flow control, parallel and multiple processing>>
+
+. <<Ch09_index.adoc#,Tutorial>>
+
+. <<Ch99_SummaryOfPoints.adoc#,Summary of points>>
+
+<<single_index.adoc#,Single-html version>>

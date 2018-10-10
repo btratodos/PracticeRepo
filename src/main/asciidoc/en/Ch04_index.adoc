@@ -1,0 +1,14 @@
+include::_include_all.adoc[]
+
+[[Ch04]]
+= Running a job
+
+. <<Ch04_SyncJob.adoc#,Synchronous execution>>
+
+. <<Ch04_JobParameter.adoc#,Job parameters>>
+
+. <<Ch04_AsyncJobWithDB.adoc#,Asynchronous execution (DB polling)>>
+
+. <<Ch04_AsyncJobWithWebContainer.adoc#,Asynchronous execution (Web container)>>
+
+. <<Ch04_Listener.adoc#, Listener>>

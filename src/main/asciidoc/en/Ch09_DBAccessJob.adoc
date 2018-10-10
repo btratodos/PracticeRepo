@@ -1,0 +1,1365 @@
+include::_include_all.adoc[]
+
+[[Ch09_DBAccessJob]]
+= A job which inputs or outputs data by accessing a database
+
+[[Ch09_DBAccessJob_Overview]]
+== Overview
+Create a job which accesses a database.
+
+Note that, since this chapter is explained based on {batch5_guide},
+refer <<Ch05_DBAccess.adoc#Ch05_DBAccess, database access>> for details.
+
+Background, process overview and business specifications of <<Ch09_TutorialApplication.adoc#Ch09_TutorialApplication, Explanation of application to be created>>
+are listed below.
+
+[[Ch09_DBAccessJob_Overview_Background]]
+=== Background
+Some mass retail stores issue point cards to the members.  +
+Membership types include "Gold members", "Normal members" and the services are provided based on membership type. +
+As a part of the service, 100 points are added for "gold members" and 10 points are added for "normal members" at the end of the month,
+for the members who have purchased a product during that month.
+
+[[Ch09_DBAccessJob_Overview_ProcessOverview]]
+=== Process overview
+{batch5_shortname} will be using an application as a monthly batch process which adds
+points based on membership type. 
+
+[[Ch09_DBAccessJob_Overview_BusinessSpecification]]
+=== Business specifications
+Business specifications are as shown below.
+
+* When the product purchasing flag is "1"(process target), points are added based on membership type
+** Add 100 points when membership type is "G"(gold member), and add 10 points when membership type is "N" (Normal member)
+* * Product purchasing flag is updated to "0" (initial status) after adding points
+* Upper limit of points is 1,000,000 points
+* If the points exceed 1,000,000 points after adding points, they are adjusted to 1,000,000 points
+
+[[Ch09_DBAccessJob_Overview_TableSpecification]]
+=== Table specifications
+Specifications of member information table acting as an input and output resource are as shown below.
+
+[cols="3,15,10,4,12,8,45", options="header"]
+.Member information table (member_info)
+|===
+|No
+|Attribute name
+|Column name
+|PK
+|Data type
+|Number of digits
+|Explanation
+
+|1
+|Member ID
+|id
+|icon:check[]
+|CHAR
+|8
+|Indicates a fixed 8 digit number which uniquely identifies a member.
+
+|2
+|Membership type
+|type
+|-
+|CHAR
+|1
+|Membership type is as shown below. +
+"G"(Gold member), "N"(Normal member)
+
+|3
+|Product purchasing flag
+|status
+|-
+|CHAR
+|1
+|Indicates whether you have purchased a product in the month. +
+When the product is purchased, it is updated to "1"(process target) and to "0"(initial status) during monthly batch processing.
+
+|4
+|Point
+|point
+|-
+|INT
+|7
+|Indicates points retained by the member. +
+Initial value is 0.
+
+|===
+
+[NOTE]
+.Regarding table specifications
+====
+Note that table design is not done in accordance with the actual implementation
+considering the convenience of implementing this tutorial.
+====
+
+[[Ch09_DBAccessJob_Overview_JobOverview]]
+=== Job overview
+Process flow and process sequence are shown below in order to understand 
+the overview of job which accesses database created here.
+
+Process sequence covers the scope of transaction control.
+Transaction control for a job uses a system containing Spring Batch which is explained by defining it as a framework transaction.
+For details of transaction control, refer <<Ch05_Transaction.adoc#Ch05_Transaction, Transaction control>>.
+
+//^
+Process flow overview::
+Overview of process flow is shown below.
+
+.Process flow of database access job
+image::ch09/DBAccess/Ch09_DBAccessJob_ProcessFlow.png[ProcessFlow of DBAccess Job]
+
+//^
+Process sequence in case of a chunk model::
+Process sequence in case of a chunk model is explained.
+
+Orange object indicates a class to be implemented now.
+
+.Sequence diagram of chunk model
+image::Ch09_DBAccessJob_ProcessSequence_ChunkModel.png[ProcessSequence of DBAccess Job by ChunkModel]
+
+.Explanation of sequence diagram
+. Step is executed from the job.
+. Step opens a resource.
+. ``MyBatisCursorItemReader`` fetches all the member information from member_info table (issue select statement).
+** Repeat subsequent processes until input data is exhausted.
+** Start a framework transaction in chunk units.
+** Repeat the process from 4 to 10 until a chunk size is reached.
+. Step fetches 1 record of input data from ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` fetches 1 record of input data from member_info table.
+. member_info table returns input data to ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` returns input data to step.
+. Step performs a process for input data by ``PointAddItemProcessor``.
+. ``PointAddItemProcessor`` reads input data and adds points.
+. ``PointAddItemProcessor`` returns process results to the step.
+. Step outputs chunk size data by ``MyBatisBatchItemWriter``.
+. ``MyBatisBatchItemWriter`` updates member information (issue update statement) for member_info table.
+. Step commits framework transaction.
+. Step returns exit code (Here, normal termination:0) to the job.
+
+//^
+Process sequence in case of a tasklet model::
+Process sequence in case of a tasklet model is explained.
+
+In this tutorial, a method which is used in chunk model is adopted for tasklet model as well wherein data for a certain number of fixed records are processed together in a batch.
+This method enables efficient processing of a large amount of data. For details, refer <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob_HowToUse_Implements_InOut, Tasklet implementation which use components of chunk model>>.
+
+Orange coloured object indicates a class to be implemented now.
+
+.Sequence diagram of tasklet model
+image::Ch09_DBAccessJob_ProcessSequence_TaskletModel.png[ProcessSequence of DBAccess Job by TaskletModel]
+
+.Explanation of sequence diagram
+. Step is executed from job.
+** Step starts a framework transaction.
+. Step executes ``PointAddTasklet``.
+. ``PointAddTasklet`` opens a resource.
+. ``MyBatisCursorItemReader`` fetches all the member information from member_info table (issue select statement).
+** Repeat processes from 5 to 9 until input data is exhausted.
+** Repeat processes from 5 to 11 until a certain number of records is reached.
+. ``PointAddTasklet`` fetches 1 record of input data from ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` fetches 1 record of input data from member_info table.
+. member_info table returns input data to ``MyBatisCursorItemReader``.
+. ``MyBatisCursorItemReader`` returns input data to tasklet.
+. ``PointAddTasklet`` reads input data and adds points.
+. ``PointAddTasklet`` outputs data of certain records by ``MyBatisBatchItemWriter``.
+. ``MyBatisBatchItemWriter`` updates member information (issue update statement) from member_info table.
+. ``PointAddTasklet`` returns process termination to step.
+. Step commits a framework transaction.
+. Step returns an exit code (here, successful termination: 0) to the job.
+
+How to implement in chunk model and tasklet model is subsequently explained.
+
+* <<Ch09_DBAccessJob_Chunk>>
+* <<Ch09_DBAccessJob_Tasklet>>
+
+[[Ch09_DBAccessJob_Chunk]]
+== Implementation in chunk model
+Processes from creation to execution for the job which accesses database in chunk model are shown with the following procedures.
+
+. <<Ch09_DBAccessJob_Chunk_JobDefinition>>
+. <<Ch09_DBAccessJob_Chunk_Dto>>
+. <<Ch09_DBAccessJob_Chunk_MyBatis>>
+. <<Ch09_DBAccessJob_Chunk_Logic>>
+. <<Ch09_DBAccessJob_Chunk_Execution>>
+
+[[Ch09_DBAccessJob_Chunk_JobDefinition]]
+=== Creating job Bean definition file
+How to combine the elements which configure the job which accesses database in the chunk model is set in Bean definition file. +
+Frame and common settings of Bean definition file alone are described here and each configuration element is set in subsequent sections.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <!-- (1) -->
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+    
+    <!-- (2) -->
+    <context:annotation-config/>
+    
+    <!-- (3) -->
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.chunk"/>
+    
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Always import settings to read required Bean definitions while using {batch5_shortname}.
+
+|(2)
+|Enable Bean definition by using an annotation.
+Use it with (3) while implementing ItemProcessor and Listener.
+
+|(3)
+|Configure component scanning. +
+Specify a package containing component to be used (implementation class of ItemProcessor etc.), in ``base-package`` attribute. +
+Use it with (2) while defining a Bean by using an annotation.
+
+|===
+
+[[Ch09_DBAccessJob_Chunk_Dto]]
+=== Implementation of DTO
+Implement a DTO class as a class to retain business data. +
+Create a DTO class for each table.
+
+Since it is used as common in chunk model / tasklet model, it can be skipped if created already.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.dto.MemberInfoDTO
+----
+package org.terasoluna.batch.tutorial.common.dto;
+
+public class MemberInfoDto {
+    private String id; // (1)
+
+    private String type; // (2)
+
+    private String status; // (3)
+
+    private int point; // (4)
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public int getPoint() {
+        return point;
+    }
+
+    public void setPoint(int point) {
+        this.point = point;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define ``id`` as a field corresponding to member Id.
+
+|(2)
+|Define ``type`` as a field corresponding to membership type.
+
+|(3)
+|Define ``status`` as a field corresponding to product purchasing flag.
+
+|(4)
+|Define ``point`` as a field corresponding to points.
+
+|===
+
+[[Ch09_DBAccessJob_Chunk_MyBatis]]
+=== Defining database access by using MyBatis
+Implementation and setting for database access using MyBatis.
+
+Implement following processes.
+
+. <<Ch09_DBAccessJob_Chunk_MyBatis_Repository>>
+. <<Ch09_DBAccessJob_Chunk_MyBatis_MapperXML>>
+. <<Ch09_DBAccessJob_Chunk_MyBatis_Bean>>
+
+Since it is used as common in chunk model / tasklet model, it can be skipped if created already.
+
+[[Ch09_DBAccessJob_Chunk_MyBatis_Repository]]
+==== Implementation of Repository interface
+Implement an interface to call SQL which is defined in MapperXML. +
+Since the implementation class for the interface is automatically generated by MyBatis, the developers are required to create only the interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository
+----
+package org.terasoluna.batch.tutorial.common.repository;
+
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+import java.util.List;
+
+public interface MemberInfoRepository {
+  List<MemberInfoDto> findAll(); // (1)
+  
+  int updatePointAndStatus(MemberInfoDto memberInfo); // (2)
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define a method corresponding to ID of SQL defined in MapperXML file. +
+Here, define a method to fetch all the records from member_info table.
+
+|(2)
+|Here, define a method to update point and status column of member_info table.
+
+|===
+
+[[Ch09_DBAccessJob_Chunk_MyBatis_MapperXML]]
+==== Creating MapperXML file
+Create a MapperXML file which describes settings of SQL and O/R mapping. +
+MapperXML file is created for each Repository interface.
+
+It is possible to read MapperXML file automatically by storing it in a directory which is in conformance with rules defined by MyBatis.
+Store Mapper file in the directory at the level same as package level of Repository interface to enable reading MapperXML file automatically.
+
+[source, xml]
+.src/main/resources/org/terasoluna/batch/tutorial/common/repository/MemberInfoRepository.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!-- (1) -->
+<mapper namespace="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository">
+
+    <!-- (2) -->
+    <select id="findAll" resultType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto">
+        SELECT
+            id,
+            type,
+            status,
+            point
+        FROM
+            member_info
+        ORDER BY
+            id ASC
+    </select>
+
+    <!-- (3) -->
+    <update id="updatePointAndStatus" parameterType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto">
+        UPDATE
+            member_info
+        SET
+            status = #{status},
+            point = #{point}
+        WHERE
+            id = #{id}
+    </update>
+</mapper>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify a fully qualified class name (FQCN) of Repository interface, in namespace attribute of mapper element.
+
+|(2)
+|Set SQL of reference system. +
+Here, set a SQL which fetches all the records from member_info table.
+
+|(3)
+|Set a SQL for update. +
+Here, set a SQL to update status and points for the records that 
+match with id specified in member_info table.
+
+|===
+
+[[Ch09_DBAccessJob_Chunk_MyBatis_Bean]]
+==== Configuring Job Bean definition file
+Add following (1) to (3) to job Bean definition file as a setting to access the database by using MyBatis.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.chunk"/>
+
+    <!-- (1) -->
+    <mybatis:scan base-package="org.terasoluna.batch.tutorial.common.repository" factory-ref="jobSqlSessionFactory"/>
+
+    <!-- (2) -->
+    <bean id="reader"
+          class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+          p:queryId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.findAll"
+          p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+    <!-- (3) -->
+    <bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+          p:statementId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.updatePointAndStatus"
+          p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure to scan Repository interface. +
+Specify a base package which stores Repository interface, in ``base-package`` attribute.
+
+|(2)
+|Configure ItemReader. +
+Specify ``org.mybatis.spring.batch.MyBatisCursorItemReader`` provided by MyBatis-Spring - a Spring linkage library offered by MyBatis, in ``class`` attribute.
+Use ``MyBatisCursorItemReader`` to fetch a large amount of data from the database.
+For details, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Database access in ItemReader>>. +
+Specify ``namespace``+``id`` for SQL set in MapperXML file, in ``queryId`` attribute.
+
+|(3)
+|Configure ItemWriter. +
+Specify ``org.mybatis.spring.batch.MyBatisBatchItemWriter`` provided by MyBatis-Spring - a Spring linkage library offered by MyBatis, in ``class`` attribute. +
+Specify ``namespace``+``id`` for SQL set in MapperXML file, in ``queryId`` attribute.
+
+|===
+
+[NOTE]
+.Accessing database other than ItemReader / ItemWriter
+====
+A method which uses Mapper interface is adopted as a method to access database other than ItemReader or ItemWriter.
+Since restrictions are set as {batch5_shortname} while using Mapper interface, 
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor, Accessing database other than ItemReader/ItemWriter>> should be referred.
+For ItemProcessor implementation, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_ItemProcess, Database access in ItemProcessor>>.
+====
+
+[[Ch09_DBAccessJob_Chunk_Logic]]
+=== Implementation of logic
+Implement a business logic class to add points.
+
+Implement following processes.
+
+. <<Ch09_DBAccessJob_Chunk_Logic_ItemProcessor>>
+. <<Ch09_DBAccessJob_Chunk_Logic_Bean>>
+
+[[Ch09_DBAccessJob_Chunk_Logic_ItemProcessor]]
+==== Implementation of PointAddItemProcessor class
+Implement PointAddItemProcessor class which implements ItemProcessor interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.dbaccess.chunk.PointAddItemProcessor
+----
+package org.terasoluna.batch.tutorial.dbaccess.chunk;
+
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+
+@Component // (1)
+public class PointAddItemProcessor implements ItemProcessor<MemberInfoDto, MemberInfoDto> { // (2)
+
+    private static final String TARGET_STATUS = "1"; // (3)
+
+    private static final String INITIAL_STATUS = "0"; // (4)
+
+    private static final String GOLD_MEMBER = "G"; // (5)
+
+    private static final String NORMAL_MEMBER = "N"; // (6)
+
+    private static final int MAX_POINT = 1000000; // (7)
+
+    @Override
+    public MemberInfoDto process(MemberInfoDto item) throws Exception { // (8) (9) (10)
+        if (TARGET_STATUS.equals(item.getStatus())) {
+            if (GOLD_MEMBER.equals(item.getType())) {
+                item.setPoint(item.getPoint() + 100);
+            } else if (NORMAL_MEMBER.equals(item.getType())) {
+                item.setPoint(item.getPoint() + 10);
+            }
+
+            if (item.getPoint() > MAX_POINT) {
+                item.setPoint(MAX_POINT);
+            }
+
+            item.setStatus(INITIAL_STATUS);
+        }
+
+        return item;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define a Bean by assigning ``@Component`` annotation to subject it to component scanning.
+
+|(2)
+|Implement ``ItemProcessor`` interface which specifies type of objects used in input and output, in respective generics. +
+Here, specify ``MemberInfoDTO`` created in <<Ch09_DBAccessJob_Chunk_Dto>> along with objects used in input and output.
+
+|(3)
+|Define product purchasing flag: 1 for point addition, as a constant. +
+Originally, such a field constant is defined as a constant class and it is very rarely defined in logic.
+It should be noted that it is defined as a constant for the sake of convenience of this tutorial. (Applicable to subsequent constants as well)
+
+|(4)
+|Define initial value of product purchasing flag:0, as a constant.
+
+|(5)
+|Define membership type: G (gold member), as a constant.
+
+|(6)
+|Define membership type: N (normal member), as a constant.
+
+|(7)
+|Define upper limit of points: 1000000, as a constant.
+
+|(8)
+|Define product purchasing flag, and business logic for adding points corresponding to membership type.
+
+|(9)
+|``MemberInfoDTO`` - a type of output object specified by generics of ``ItemProcessor`` interface
+implemented by the class is the type used for return value.
+
+|(10)
+|``MemberInfoDTO`` - a type of input object specified by generics of ``ItemProcessor`` interface
+implemented by the class is the type used for ``item`` which is received as an argument.
+
+|===
+
+[[Ch09_DBAccessJob_Chunk_Logic_Bean]]
+==== Configuring job Bean definition file
+Add following (1) and subsequent objects to job Bean definition file in order to configure created business logic as a job.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddChunk.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+                      
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.chunk"/>
+
+    <mybatis:scan base-package="org.terasoluna.batch.tutorial.common.repository" factory-ref="jobSqlSessionFactory"/>
+
+    <bean id="reader"
+          class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+          p:queryId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.findAll"
+          p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+    <bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+          p:statementId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.updatePointAndStatus"
+          p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+    <!-- (1) -->
+    <batch:job id="jobPointAddChunk" job-repository="jobRepository">
+        <batch:step id="jobPointAddChunk.step01"> <!-- (2) -->
+            <batch:tasklet transaction-manager="jobTransactionManager">
+                <batch:chunk reader="reader"
+                             processor="pointAddItemProcessor"
+                             writer="writer" commit-interval="10"/> <!-- (3) -->
+            </batch:tasklet>
+        </batch:step>
+    </batch:job>
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+|(1)
+|Configure job. +
+``id`` attribute must be unique within the scope of all the jobs included in 1 batch application. +
+Here, ``jobPointAddChunk`` is specified as a job name of chunk model.
+
+|(2)
+|Configure step. +
+It is not necessary to have a unique ``id`` attribute within the scope of all the jobs included in 1 batch application, however a unique id is used to enable easy tracking at the time of failure occurrence. +
+[step + Sr. No.] is added to id attribute specified in (1) unless for a specific reason mentioned. +
+Here, specify ``jobPointAddChunk.step01`` as a step name for the job of chunk model.
+
+|(3)
+|Configure a chunk model job. +
+Specify Bean ID of ``ItemReader`` and ``ItemWriter`` defined in previous section, in respective attributes of ``reader`` and ``writer``. +
+Specify ``pointAddItemProcessor`` - a Bean ID of implementation class of ItemProcessor, in ``processor`` attribute.+
+Set number of input data records for 1 chunk as 10, in ``commit-interval`` attribute.
+
+|===
+
+[NOTE]
+.commit-interval tuning
+====
+commit-interval is a tuning point for performance during a chunk model job.
+
+It is set as 10 records in this tutorial, however, the appropriate number of records vary depending on available machine resources and job characteristics.
+Process throughput is likely to reach from 10 records to 100 records in case of a job which processes data by accessing multiple resources.
+Alternately, if the input and output resources are in 1:1 ratio and there are enough jobs to transfer data, process throughput can reach 5000 to 10000 records as well.
+
+It is advisable to temporarily place commit-interval to 100 records while implementing a job and then perform tuning for each job in accordance with the results of performance measurement.
+====
+
+[[Ch09_DBAccessJob_Chunk_Execution]]
+=== Job execution and results verification
+Execute created job on STS and verify results.
+
+[[Ch09_DBAccessJob_Chunk_Execution_Run]]
+==== Execute job from execution configuration
+Create execution configuration as below and execute job. +
+For how to create execution configuration, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck, Verifying project operations>>.
+
+Setting value for execution configuration::
+* Name: Any name (Example: Run DBAccessJob for ChunkModel)
+* Main tab
+** Project: ``terasoluna-batch-tutorial``
+** Main class: ``org.springframework.batch.core.launch.support.CommandLineJobRunner``
+* Arguments tab
+** Program arguments: ``META-INF/jobs/dbaccess/jobPointAddChunk.xml jobPointAddChunk``
+
+[[Ch09_DBAccessJob_Chunk_Execution_Console]]
+==== Verifying console log
+Verify that logs are output to console for following details.
+
+[source, console]
+.Console log output example
+----
+[2017/09/12 13:32:32] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddChunk]] completed with the following parameters: [{jsr_batch_run_id=484}] and the following status: [COMPLETED]
+[2017/09/12 13:32:32] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@735f7ae5: startup date [Tue Sep 12 13:32:29 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_DBAccessJob_Chunk_Execution_Exitcode]]
+==== Verifying exit code
+Verify that the process has terminated successfully, using exit code. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Verify that the exit code (exit value) is 0 (successful termination).
+
+.Verifying exit codes
+image::ch09/DBAccess/Ch09_DBAccessJob_Confirm_ExitCode_ChunkModel.png[Confirm the Exit Code of DBAccessJob for ChunkModel]
+
+[[Ch09_DBAccessJob_Chunk_Execution_Table]]
+==== Verifying member information table
+Compare contents of member information table before and after update and verify that the contents are in accordance with the verification details. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_RefDB, Refer database by using Data Source Explorer>>.
+
+Verification details::
+* status column
+** Records with "0"(initial status) should not exist
+* point column
+** Points are added according to membership type, for point addition
+*** 100 points when type column is "G"(gold member)
+*** 10 points when type column is "N"(normal member)
+** Records exceeding 1,000,000 points (upper limit value) should not exist
+
+Details of member information table before and after update are as shown below.
+
+.Details of member information table before and after update
+image::ch09/DBAccess/Ch09_DBAccessJob_Result_MemberInfoTable.png[Table of member_info]
+
+[[Ch09_DBAccessJob_Tasklet]]
+== Implementation in tasklet model
+Processes from creation to execution of job which accesses database in tasklet model are implemented by following procedures.
+
+. <<Ch09_DBAccessJob_Tasklet_JobDefinition>>
+. <<Ch09_DBAccessJob_Tasklet_Dto>>
+. <<Ch09_DBAccessJob_Tasklet_MyBatis>>
+. <<Ch09_DBAccessJob_Tasklet_Logic>>
+. <<Ch09_DBAccessJob_Tasklet_Execution>>
+
+[[Ch09_DBAccessJob_Tasklet_JobDefinition]]
+=== Creating job Bean definition file
+How to combine elements constituting the job which access database in tasklet model is set in Bean definition file. +
+Here, only frame and common settings of Bean definition file are described and each configuration element is set in subsequent sections.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddtasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <!-- (1) -->
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+    
+    <!-- (2) -->
+    <context:annotation-config/>
+    
+    <!-- (3) -->
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.tasklet"/>
+    
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Always import settings to read required Bean definitions while using {batch5_shortname}.
+
+|(2)
+|Enable Bean definition by using an annotation.
+Use it together with (3) while implementing ItemProcessor and Listener.
+
+|(3)
+|Configure component scanning. +
+Specify a package storing components to be used (implementation class of Tasklet etc), in ``base-package`` attribute. +
+Use it together with (2) while defining a Bean using an annotation.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_Dto]]
+=== Implementation of DTO
+Create a DTO class as a class to retain business data. +
+Create a DTO class for each table.
+
+Since it is used as common in chunk model / tasklet model, it can be skipped if created already.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.dto.MemberInfoDTO
+----
+package org.terasoluna.batch.tutorial.common.dto;
+
+public class MemberInfoDto {
+    private String id; // (1)
+
+    private String type; // (2)
+
+    private String status; // (3)
+
+    private int point; // (4)
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public int getPoint() {
+        return point;
+    }
+
+    public void setPoint(int point) {
+        this.point = point;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define ``id`` as a field which corresponds to member id.
+
+|(2)
+|Define ``type`` as a field which corresponds to membership type.
+
+|(3)
+|Define ``status`` as a field which corresponds to product purchasing flag.
+
+|(4)
+|Define ``point`` as a field corresponding to points.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_MyBatis]]
+=== Defining database access by using MyBatis
+Implement and configure to access database by using MyBatis.
+
+Implement following operations.
+
+. <<Ch09_DBAccessJob_Tasklet_MyBatis_Repository>>
+. <<Ch09_DBAccessJob_Tasklet_MyBatis_MapperXML>>
+. <<Ch09_DBAccessJob_Tasklet_MyBatis_Bean>>
+
+Since it is used as common in chunk model / tasklet model, it can be skipped if created already.
+
+[[Ch09_DBAccessJob_Tasklet_MyBatis_Repository]]
+==== Implementation of Repository interface
+Create an interface to call SQL which is defined in MapperXML file. +
+Since implementation class for the interface is automatically generated by MyBatis, the developer only needs to create an interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository
+----
+package org.terasoluna.batch.tutorial.common.repository;
+
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+import java.util.List;
+
+public interface MemberInfoRepository {
+    List<MemberInfoDto> findAll(); // (1)
+    
+    int updatePointAndStatus(MemberInfoDto memberInfo); // (2)
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define a method corresponding to ID of SQL which is defined in MapperXML file. +
+Here, a method is defined to fetch all the records from member_info table.
+
+|(2)
+|Here, define a method to update point column and status column of member_info table.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_MyBatis_MapperXML]]
+==== Creating MapperXML file
+Create a MapperXML file which describes settings of SQL and O/R mapping. +
+Create MapperXML file for each Repository interface.
+
+MapperXML file can be read automatically by storing it in a directory which is in conformance with the rules defined by MyBatis.
+Store MapperXML file in the directory at the level same as package layer of Repository interface to enable reading of MapperXML file automatically.
+
+[source, xml]
+.src/main/resources/org/terasoluna/batch/tutorial/common/repository/MemberInfoRepository.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!-- (1) -->
+<mapper namespace="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository">
+
+    <!-- (2) -->
+    <select id="findAll" resultType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto">
+        SELECT
+            id,
+            type,
+            status,
+            point
+        FROM
+            member_info
+        ORDER BY
+            id ASC
+    </select>
+
+    <!-- (3) -->
+    <update id="updatePointAndStatus" parameterType="org.terasoluna.batch.tutorial.common.dto.MemberInfoDto">
+        UPDATE
+            member_info
+        SET
+            status = #{status},
+            point = #{point}
+        WHERE
+            id = #{id}
+    </update>
+</mapper>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Specify fully qualified class name (FQCN) of Repository interface, in namespace attribute of mapper element.
+
+|(2)
+|Define reference SQL. +
+Here, configure SQL to fetch all the records from member_info table.
+
+|(3)
+|Define update SQL. +
+Here, set SQL to update status and point for the records that match with
+specified id of member_info table.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_MyBatis_Bean]]
+==== Setting job Bean definition file
+Add following (1) ~ (3) to job Bean definition file as a setting to access database by using MyBatis.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.tasklet"/>
+
+    <!-- (1) -->
+    <mybatis:scan base-package="org.terasoluna.batch.tutorial.common.repository" factory-ref="jobSqlSessionFactory"/>
+
+    <!-- (2) -->
+    <bean id="reader"
+          class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+          p:queryId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.findAll"
+          p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+    <!-- (3) -->
+    <bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+          p:statementId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.updatePointAndStatus"
+          p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure to scan Repository interface. +
+Specify a base package which stores Repository interface, in ``base-package`` attribute.
+
+|(2)
+|Configure ItemReader. +
+Specify ``org.mybatis.spring.batch.MyBatisCursorItemReader`` provided by Spring linkage library - MyBatis-Spring provided by MyBatis, in ``class`` attribute. +
+Specify ``namespace``+``id`` of SQL set in MapperXML file, in ``queryId`` attribute.
+
+|(3)
+|Configure ItemWriter. +
+Specify ``org.mybatis.spring.batch.MyBatisBatchItemWriter`` provided by MyBatis-Spring - Spring linkage library provided by MyBatis, in ``class`` attribute. +
+Specify ``namespace``+``id`` of SQL set in MapperXML file, in ``statementId`` attribute.
+
+|===
+
+[NOTE]
+.Tasklet implementation which use components of chunk model
+====
+In this tutorial, ItemReader . ItemWriter - components of chunk model are used
+in order to easily create a job which accesses database in the tasklet model.
+
+Refer <<Ch03_CreateTaskletJob#Ch03_CreateTaskletJob_HowToUse_Implements_InOut, Tasklet implementation which use components of chunk model>> and determine appropriately
+for whether to use various components of chunk model during Tasklet implementation.
+====
+
+[NOTE]
+.Accessing database other than ItemReader and ItemWriter
+====
+A method which use Mapper interface is adopted as a method to access database other than ItemReader and ItemWriter.
+Since restrictions are set as {batch5_shortname} while using Mapper interface,
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor, Database access other than ItemReader and ItemWriter>> should be referred.
+For Tasklet implementation, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_Tasklet, database access in Tasklet>>.
+====
+
+[[Ch09_DBAccessJob_Tasklet_Logic]]
+=== Implementation of logic
+Implement a business logic class which adds points.
+
+Implement following operations.
+
+. <<Ch09_DBAccessJob_Tasklet_Logic_Tasklet>>
+. <<Ch09_DBAccessJob_Tasklet_Logic_Bean>>
+
+[[Ch09_DBAccessJob_Tasklet_Logic_Tasklet]]
+==== Implementation of PointAddTasklet class
+Implement PointAddTasklet class which implements Tasklet interface.
+
+[source, java]
+.org.terasoluna.batch.tutorial.dbaccess.tasklet.PointAddTasklet
+----
+package org.terasoluna.batch.tutorial.dbaccess.tasklet;
+
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ItemStreamReader;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.stereotype.Component;
+import org.terasoluna.batch.tutorial.common.dto.MemberInfoDto;
+
+import javax.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
+
+@Component // (1)
+public class PointAddTasklet implements Tasklet {
+
+    private static final String TARGET_STATUS = "1"; // (2)
+
+    private static final String INITIAL_STATUS = "0"; // (3)
+
+    private static final String GOLD_MEMBER = "G"; // (4)
+
+    private static final String NORMAL_MEMBER = "N"; // (5)
+
+    private static final int MAX_POINT = 1000000; // (6)
+
+    private static final int CHUNK_SIZE = 10; // (7)
+
+    @Inject // (8)
+    ItemStreamReader<MemberInfoDto> reader; // (9)
+
+    @Inject // (8)
+    ItemWriter<MemberInfoDto> writer; // (10)
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception { // (11)
+        MemberInfoDto item = null;
+
+        List<MemberInfoDto> items = new ArrayList<>(CHUNK_SIZE); // (12)
+
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext()); // (13)
+
+            while ((item = reader.read()) != null) { // (14)
+
+                if (TARGET_STATUS.equals(item.getStatus())) {
+                    if (GOLD_MEMBER.equals(item.getType())) {
+                        item.setPoint(item.getPoint() + 100);
+                    } else if (NORMAL_MEMBER.equals(item.getType())) {
+                        item.setPoint(item.getPoint() + 10);
+                    }
+
+                    if (item.getPoint() > MAX_POINT) {
+                        item.setPoint(MAX_POINT);
+                    }
+
+                    item.setStatus(INITIAL_STATUS);
+                }
+
+                items.add(item);
+
+                if (items.size() == CHUNK_SIZE) { // (15)
+                    writer.write(items); // (16)
+                    items.clear();
+                }
+            }
+
+            writer.write(items); // (17)
+        } finally {
+            reader.close(); // (18)
+        }
+
+        return RepeatStatus.FINISHED; // (19)
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Define a Bean by assigning ``@Component`` annotation in order to subject it to component scanning.
+
+|(2)
+|Define product purchasing flag:1 as a constant, for point addition. +
+Originally, a field constant is defined as a constant class and it is rarely defined in the logic.
+It is defined as a constant for the sake of convenience of this tutorial. (Same is applicable to subsequent constants)
+
+|(3)
+|Define initial value of product purchasing flag = 0, as a constant.
+
+|(4)
+|Define membership type:G (gold member), as a constant.
+
+|(5)
+|Define membership type:N (normal member), as a constant.
+
+|(6)
+|Define upper limit of points:1000000, as a constant.
+
+|(7)
+|Define a unit (fixed records): 10 to be processed together.
+
+|(8)
+|Assign ``@Inject`` annotation and inject ``ItemStreamReader/ItemWriter`` implementation.
+
+|(9)
+|Define the type as ``ItemStreamReader`` - a sub-interface of ``ItemReader`` to access database. +
+``ItemStreamReader`` is required to open / close a resource.
+
+|(10)
+|Define ``ItemWriter``. +
+Unlike ``ItemStreamReader``, it is not necessary to open/close a resource.
+
+|(11)
+|Implement a product purchasing flag, and business logic which adds points according to membership type.
+
+|(12)
+|Define a list to store ``item`` of fixed records.
+
+|(13)
+|Open an input resource. +
+A SQL is issued within this timing.
+
+|(14)
+|Process all input resource records sequentially. +
+``ItemReader#read`` returns ``null`` when all the input data has been read.
+
+|(15)
+|Determine whether number of ``item`` added to the list has reached a certain number of records. +
+When it reaches a certain number, output it to database in (16) and ``clear`` the list.
+
+|(16)
+|Output to database. +
+It must be noted that it is not committed at this time.
+
+|(17)
+|Output all process records and remaining records to database.
+
+|(18)
+|Close resource. +
+Note that, exception handling is not implemented here for the ease of implementation. Implement exception handling when necessary. +
+When an exception occurs, transaction of entire tasklet is rolled back, stack trace of the exception is output and job is terminated abnormally.
+
+|(19)
+|Return whether the processing of Tasklet is completed. +
+Always specify ``return RepeatStatus.FINISHED;``.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_Logic_Bean]]
+==== Configuring job Bean definition file
+Add following (1) and subsequent objects to job Bean definition file to set the created business logic as a job.
+
+[source, xml]
+.src/main/resources/META-INF/jobs/dbaccess/jobPointAddTasklet.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:batch="http://www.springframework.org/schema/batch"
+       xmlns:p="http://www.springframework.org/schema/p"
+       xmlns:mybatis="http://mybatis.org/schema/mybatis-spring"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+             http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+             http://www.springframework.org/schema/batch http://www.springframework.org/schema/batch/spring-batch.xsd
+             http://mybatis.org/schema/mybatis-spring http://mybatis.org/schema/mybatis-spring.xsd">
+
+    <import resource="classpath:META-INF/spring/job-base-context.xml"/>
+
+    <context:annotation-config/>
+
+    <context:component-scan base-package="org.terasoluna.batch.tutorial.dbaccess.tasklet"/>
+
+    <mybatis:scan base-package="org.terasoluna.batch.tutorial.common.repository" factory-ref="jobSqlSessionFactory"/>
+
+    <bean id="reader"
+          class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+          p:queryId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.findAll"
+          p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+    <bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+          p:statementId="org.terasoluna.batch.tutorial.common.repository.MemberInfoRepository.updatePointAndStatus"
+         p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+    <!-- (1) -->
+    <batch:job id="jobPointAddTasklet" job-repository="jobRepository">
+        <batch:step id="jobPointAddTasklet.step01"> <!-- (2) -->
+            <batch:tasklet transaction-manager="jobTransactionManager"
+                           ref="pointAddTasklet"/> <!-- (3) -->
+        </batch:step>
+    </batch:job>
+</beans>
+----
+
+[cols="10,90", options="header"]
+.Explanation
+|===
+|Sr. No.
+|Explanation
+
+|(1)
+|Configure job. +
+``id`` attribute should be unique within the scope of all the jobs included in 1 batch application. +
+Here, ``jobPointAddTasklet`` is specified as a job name of tasklet model.
+
+|(2)
+|Configure step. +
+It is not necessary to have a unique ``id`` attribute within the scope of all the jobs included in 1 batch application, however a unique id is used to enable easy tracking at the time of occurrence of a failure. +
+Add [step + Sr. No.] to id specified in (1) unless for a specific reason. +
+Here, specify ``jobPointAddTasklet.step01`` as a step name of job for tasklet model.
+
+|(3)
+|Configure tasklet. +
+Specify ``pointAddTasklet`` - a Bean ID of implementation class of Tasklet, in ``ref`` attribute.
+
+|===
+
+[[Ch09_DBAccessJob_Tasklet_Execution]]
+=== Verifying execution of job and results
+Execute the created job on STS and verify results.
+
+[[Ch09_DBAccessJob_Tasklet_Execution_Run]]
+==== Execute job from execution configuration
+Create execution configuration as below and execute job. +
+For how to create execution configuration, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck, Verify project operations>>.
+
+Setup value of execution configuration::
+* Name: Any name (Example: Run DBAccessJob for TaskletModel)
+* Main tab
+** Project: ``terasoluna-batch-tutorial``
+** Main class: ``org.springframework.batch.core.launch.support.CommandLineJobRunner``
+* Arguments tab
+** Program arguments: ``META-INF/jobs/dbaccess/jobPointAddTasklet.xml jobPointAddTasklet``
+
+[[Ch09_DBAccessJob_Tasklet_Execution_Console]]
+==== Verifying console log
+Verify that following details are output in Console.
+
+[source, console]
+.Console log output example
+----
+[2017/09/12 10:09:56] [main] [o.s.b.c.l.s.SimpleJobLauncher] [INFO ] Job: [FlowJob: [name=jobPointAddTasklet]] completed with the following parameters: [{jsr_batch_run_id=472}] and the following status: [COMPLETED]
+[2017/09/12 10:09:56] [main] [o.s.c.s.ClassPathXmlApplicationContext] [INFO ] Closing org.springframework.context.support.ClassPathXmlApplicationContext@735f7ae5: startup date [Tue Sep 12 10:09:54 JST 2017]; root of context hierarchy
+----
+
+[[Ch09_DBAccessJob_Tasklet_Execution_Exitcode]]
+==== Verifying exit codes
+Verify that the process has terminated successfully, by exit codes. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_ExecJob_Run, Job execution and results verification>>.
+Verify that the exit code (exit value) is 0 (Successful termination).
+
+.Verifying exit codes
+image::ch09/DBAccess/Ch09_DBAccessJob_Confirm_ExitCode_TaskletModel.png[Confirm the Exit Code of DBAccessJob for TaskletModel]
+
+[[Ch09_DBAccessJob_Tasklet_Execution_Table]]
+==== Verifying member information table
+Compare contents of member information table before and after update, and verify that the contents are in accordance with the verification details. +
+For verification procedure, refer <<Ch09_EnvironmentConstruction.adoc#Ch09_EnvironmentConstruction_OperationCheck_RefDB, Refer database by using Data Source Explorer>>.
+
+Verification details::
+* status column
+** Records with "0"(initial status) should not exist
+* point column
+** Points should be added in accordance with membership type, for point addition
+*** 100 points when type column is "G"(gold member)
+*** 10 points when type column is "N"(normal member)
+** Records exceeding 1,000,000 points (upper limit) should not exist
+
+Contents of member information table before and after update are as shown below.
+
+.Contents of member information table before and after update
+image::ch09/DBAccess/Ch09_DBAccessJob_Result_MemberInfoTable.png[Table of member_info]

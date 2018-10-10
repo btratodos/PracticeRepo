@@ -1,0 +1,18 @@
+[[Ch06]]
+= Support to abnormal system
+include::_include_all.adoc[]
+
+// Go down a level further to link documents starting from section
+:leveloffset: +1
+
+include::Ch06_InputValidation.adoc[]
+
+<<<
+
+include::Ch06_ExceptionHandling.adoc[]
+
+<<<
+
+include::Ch06_ReProcessing.adoc[]
+
+:leveloffset: -1
