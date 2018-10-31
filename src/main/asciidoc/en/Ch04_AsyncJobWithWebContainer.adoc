@@ -438,7 +438,7 @@ image::Ch04_AsyncJobWithWebContainer_AppendBeanDefinitionsOnBlank.png[AppendBean
 .Bean definition file to be added/deleted
 |===
 
-|S. No.
+|Sr. No.
 |Description
 
 |(1)
