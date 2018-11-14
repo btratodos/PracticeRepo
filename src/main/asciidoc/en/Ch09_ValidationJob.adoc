@@ -330,7 +330,7 @@ public class PointAddItemProcessor implements ItemProcessor<MemberInfoDto, Membe
 |(3)
 |Execute ``Validator#validate()`` by using DTO fetched through ``ItemReader`` as an argument. +
 Originally, try-catch was implemented to handle input check error and catch the exception while executing ``validate()``,
-however, since exception handling using try-catch is explained in <<Ch09_ExceptionHandlingJob.adoc#Ch09_ExceptionHandlingJob, Exception handling by try-catch>>,
+however, since exception handling using try-catch is explained in <<Ch09_ExceptionHandlingWithTryCatchJob.adoc#Ch09_ExceptionHandlingWithTryCatchJob, Job performing exception handling by try-catch>>,
 exception handling is not implemented here.
 
 |===
@@ -567,7 +567,7 @@ public class PointAddTasklet implements Tasklet {
 |(3)
 |Execute ``Validator#validate()`` using DTO fetched through ``ItemReader`` as an argument. +
 Originally, try-catch was implemented to handle input check error and catch the exception while executing ``validate()``, however
-since exception handling using try-catch is explained in <<Ch09_ExceptionHandlingJob.adoc#Ch09_ExceptionHandlingJob, Exception handling by using try-catch>>,
+since exception handling using try-catch is explained in <<Ch09_ExceptionHandlingWithTryCatchJob.adoc#Ch09_ExceptionHandlingWithTryCatchJob, Job performing exception handling by try-catch>>,
 exception handling is not implemented here.
 
 |===
