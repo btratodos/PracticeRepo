@@ -442,7 +442,7 @@ image::Ch04_AsyncJobWithWebContainer_AppendBeanDefinitionsOnBlank.png[AppendBean
 |Description
 
 |(1)
-|(2) is created in spring-mvc.xml, delete it as it is not required.
+|Delete spring-mvc.xml since it is not required because spring-mvc-rest.xml is created in (2).
 
 |(2)
 |Create spring-mvc-rest.xml for RESTful Web Service. Description example where definition is required is shown below.
