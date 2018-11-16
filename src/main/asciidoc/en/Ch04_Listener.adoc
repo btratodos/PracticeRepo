@@ -535,7 +535,7 @@ The case of where the following requirements are implemented is explained with t
 . Verify the validity of start parameters of input and output files by ``beforeStep`` method defined by ``StepExecutionListener``. +
 . Throw an exception if any of the start parameters is not specified.
 
-However, it is recommended to use ``JobParametersValidator`` for verifying the validity of start parameters in {batch5_shortname}.
+However, in {batch5_shortname}, it is recommended to use ``JobParametersValidator`` for verifying the validity of start parameters.
 Refer to <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_ParamsValidation,"Verification of validity of parameters">> for verifying the validity of start parameters since easy to understand validity verification is used till the end as a sample for discontinuing pre-processing here.
 
 Implementation example is shown below.
