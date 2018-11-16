@@ -281,7 +281,7 @@ For details of Spring IO platform, refer
 [WARNING]
 .Standard error output of xstream
 ====
-xstream version is 1.4.10, {SB} reads Bean definition and the the following message is output in standard error output while running job.
+xstream version is changed to 1.4.10, {SB} reads Bean definition and the following message is output in standard error output while running job.
 
 [source,console]
 ----
