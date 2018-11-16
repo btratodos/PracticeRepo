@@ -278,6 +278,22 @@ For details of Spring IO platform, refer
 . Libraries which individually depend on libraries supported by Spring IO platform
 ====
 
+[WARNING]
+.Standard error output of xstream
+====
+xstream version is 1.4.10, {SB} reads Bean definition and the the following message is output in standard error output while running job.
+
+[source,console]
+----
+Security framework of XStream not initialized, XStream is probably vulnerable.
+----
+
+Currently, since XStream security settings cannot be done in {SB}, message output cannot be controlled.
+
+When using XStream for functions (such as data linkage) other than reading the developed job Bean definition, it should be used such that the XML other than the trusted generation source should not be read using XStream.
+
+====
+
 [[Ch02_TerasolunaBatchStack_Components]]
 == Structural elements of {batch5_fullname}
 Software Framework structural elements of {batch5_fullname} are explained.
