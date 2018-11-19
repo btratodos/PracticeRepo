@@ -1131,3 +1131,89 @@ which is explained in <<Ch05_Transaction.adoc#Ch05_Transaction_HowToUse_MultiDat
 Further, since CompositeItemWriter can be linked in case of ItemWriter implementation,
 it can be done along with database output and file output by setting MyBatisBatchItemWriter and FlatFileItemWriter.
 ====
+
+[[Ch05_DBAccess_HowToExtend_SearchCondition]]
+=== How to specify search condition
+When search is to be performed by specifying search conditions while accessing database,
+search condition can be specified by fetching value from job parameter in Map format in Bean definition and setting key.
+Job start command example wherein job parameters are specified and implementation example are shown below.
+
+[source,sh]
+.Job start command when job parameters are specified
+----
+$ java -cp ${CLASSPATH} org.springframework.batch.core.launch.support.CommandLineJobRunner /META-INF/job/job001 job001 year=2017 month=12
+----
+
+[source,xml]
+.Implementation example of MapperXML
+----
+<!-- (1) -->
+<select id="findByYearAndMonth"
+    resultType="org.terasoluna.batch.functionaltest.app.model.performance.SalesPerformanceSummary">
+    <![CDATA[
+    SELECT
+        branch_id AS branchId, year, month, amount
+    FROM
+        sales_performance_summary
+    WHERE
+        year = #{year} AND month = #{month}
+    ORDER BY
+        branch_id ASC
+    ]]>
+</select>
+
+<!-- omitted -->
+
+----
+
+[source,xml]
+.Bean definition
+----
+
+<!-- omitted -->
+
+<!-- (2) -->
+<bean id="reader"
+      class="org.mybatis.spring.batch.MyBatisCursorItemReader" scope="step"
+      p:queryId="org.terasoluna.batch.functionaltest.ch08.parallelandmultiple.repository.SalesSummaryRepository.findByYearAndMonth"
+      p:sqlSessionFactory-ref="jobSqlSessionFactory">
+    <property name="parameterValues"> <!-- (3) -->
+        <map>
+            <!-- (4) -->
+            <entry key="year" value="#{jobParameters['year']}" value-type="java.lang.Integer"/>
+            <entry key="month" value="#{jobParameters['month']}" value-type="java.lang.Integer"/>
+
+            <!-- omitted -->
+        </map>
+    </property>
+</bean>
+
+<!-- omitted -->
+
+----
+
+[cols="10,90",options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Specify search conditions and define the SQL to be fetched.
+
+|(2)
+|Define ``ItemReader`` to fetch data from database.
+
+|(3)
+|Set ``parameterValues`` to property name.
+
+|(4)
+|Specify search conditions by fetching the values to be specified in search condition from job parameters and setting to key.
+Since SQL arguments are defined as numeric type, they are converted to ``Integer`` by ``value-type`` and passed.
+
+|===
+
+[NOTE]
+.StepExectionContextによる検索指定方法について
+====
+@BeforeStepなどジョブの前処理で検索条件を指定する場合は、``StepExecutionContext``に設定することで、``JobParameters``同様に取得することができる。
