@@ -689,8 +689,8 @@ public class SalesDataPartitioner implements Partitioner {
       p:sqlSessionFactory-ref="jobSqlSessionFactory">
     <property name="parameterValues">
         <map>
-            <entry key="year" value="#{new Integer(jobParameters['year'])}" />
-            <entry key="month" value="#{new Integer(jobParameters['month'])}" />
+            <entry key="year" value="#{jobParameters['year']}" value-type="java.lang.Integer"/>
+            <entry key="month" value="#{jobParameters['month']}" value-type="java.lang.Integer"/>
             <!-- (10) -->
             <entry key="dataSize" value="#{stepExecutionContext['dataSize']}" />
             <!-- (11) -->
