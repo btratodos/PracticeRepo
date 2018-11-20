@@ -1135,7 +1135,7 @@ it can be done along with database output and file output by setting MyBatisBatc
 [[Ch05_DBAccess_HowToExtend_SearchCondition]]
 === How to specify search condition
 When search is to be performed by specifying search conditions while accessing database,
-search condition can be specified by fetching value from job parameter in Map format in Bean definition and setting key.
+search condition can be specified by fetching value from job parameters in Map format in Bean definition and setting as key.
 Job start command example wherein job parameters are specified and implementation example are shown below.
 
 [source,sh]
@@ -1214,6 +1214,6 @@ Since SQL arguments are defined as numeric type, they are converted to ``Integer
 |===
 
 [NOTE]
-.StepExectionContextによる検索指定方法について
+.How to specify search by StepExectionContext
 ====
-@BeforeStepなどジョブの前処理で検索条件を指定する場合は、``StepExecutionContext``に設定することで、``JobParameters``同様に取得することができる。
+When search condition is to be specified in pre-processing of job  such as @BeforeStep, the data can be fetched same as ``JobParameters`` by setting it to ``StepExecutionContext``.
