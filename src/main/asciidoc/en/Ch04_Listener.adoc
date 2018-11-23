@@ -524,7 +524,19 @@ Listener interface::
 Annotation::
   It is used when business logic specific process is to be performed. +
   As a rule, it is implemented only for ItemProcessor.
-  
+
+[[Ch04_Listener_HowToUse_Exception]]
+=== Exception occurrence in pre-processing in StepExecutionListener
+When an exception occurs in pre-processing (``beforeStep`` method), whether to execute open/close of resource by model, changes. The case of exception occurrence in pre-processing is explained in each model.
+
+Chunk model::
+Since pre-processing is executed before opening the resource, the resource is not opened. +
+Since the resource is closed even when the resource is not opened, it is necessary to note this case when implementing ``ItemReader``/``ItemWriter``.
+
+Tasklet model::
+In Tasklet model, open/close the resource explicitly by ``execute`` method. +
+When an exception occurs in pre-processing, ``execute`` method is not executed so naturally open/close of resources is also not executed.
+
 [[Ch04_Listener_HowToUse_JobAbort]]
 === Job abort in pre-processing(StepExecutionListener#beforeStep())
 When the conditions for executing the job are not satisfied, you may want to abort the process before executing the job.
