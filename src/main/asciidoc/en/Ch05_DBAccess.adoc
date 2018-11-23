@@ -174,7 +174,7 @@ Explain the setting.
 
 In {batch5_shortname}, two different ``ExecutorType`` exists at the same time.
 It is assumed that it is often implemented by one ``ExecutorType``, but special attention is required when using them together.
-The detail will be explained in <<Ch05_DBAccess_HowToUse_Processor>>.
+The detail will be explained in <<Ch05_DBAccess_HowToUse_Input_MapperInterface>>.
 
 [NOTE]
 .Other parameter of MyBatis
@@ -302,11 +302,28 @@ Show setting example below.
 
 
 [[Ch05_DBAccess_HowToUse_Input]]
-=== Database access with ItemReader
-Explain Database access with ItemReader here.
+=== Input
+Input of database access is explained below.
+
+. <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader>>
+.. <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Overview, Functional overview>>
+.. <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Chunk, How to use in Chunk model>>
+.. <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Tasklet, How to use in Tasklet model>>
+.. <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_SearchCondition, How to specify search condition>>
+. <<Ch05_DBAccess_HowToUse_Input_MapperInterface>>
+.. <<Ch05_DBAccess_HowToUse_Input_MapperInterface_Overview, Functional overview>>
+.. <<Ch05_DBAccess_HowToUse_Input_MapperInterface_Chunk, How to use in Chunk model>>
+.. <<Ch05_DBAccess_HowToUse_Input_MapperInterface_Tasklet, How to use in Tasklet model>>
 
 [[Ch05_DBAccess_HowToUse_Input_MyBatisItemReader]]
-==== ItemReader of MyBatis
+==== MyBatisCursorItemReader
+
+Here, database access by ``MyBatisCursorItemReader`` provided as ItemReader by MyBatis-Spring
+is explained.
+
+[[Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Overview]]
+Functional overview::
+
 MyBatis-Spring provides the following two ItemReader.
 
 * ``org.mybatis.spring.batch.MyBatisCursorItemReader``
@@ -317,7 +334,7 @@ that uses the mechanism described
 in {server5_url}/ArchitectureInDetail/DataAccessDetail/DataAccessMyBatis3.html#entity-sql[Pagination search for Entity (SQL refinement method)] of {server5_guide} +
 Since SQL is issued again after acquiring a certain number of cases, there is a possibility that data consistency may not be maintained.
 Therefore, it is dangerous to use it in batch processing, so {batch5_shortname} does not use it in principle. +
-{batch5_shortname} uses only ``MyBatisCursorItemReader``.
+{batch5_shortname} uses only ``MyBatisCursorItemReader`` that links with MyBatis and returns the acquired data using Cursor.
 
 In {batch5_shortname}, as explained in <<Ch05_DBAccess_HowToUse_Config_Scan>>,
 It adopts a method of dynamically registering Mapper XML with ``mybatis:scan``.
@@ -325,10 +342,17 @@ Therefore, it is necessary to prepare an interface corresponding to Mapper XML.
 For details, please refer to
 {server5_url}/ArchitectureInDetail/DataAccessDetail/DataAccessMyBatis3.html#dataaccessmybatis3howtodababaseaccess[Implementation of database access process] in {server5_guide}.
 
-Show an example of usage of ``MyBatisCursorItemReader`` below.
+Implementation example for referring to the database using ``MyBatisCursorItemReader`` for each process model is shown below.
+
+
+[[Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Chunk]]
+How to use in Chunk model::
+
+Implementation example for referring to the database using ``MyBatisCursorItemReader`` in Chunk model is shown below. +
+Here, implementation example of ``MyBatisCursorItemReader`` and implementation example of ``ItemProcessor`` for processing the data fetched from database using the implemented ``MyBatisCursorItemReader`` are explained.
 
 [source,xml]
-.META-INF/jobs/common/jobCustomerList01.xml
+.Bean definition
 ----
 <!-- (1) -->
 <mybatis:scan
@@ -336,21 +360,32 @@ Show an example of usage of ``MyBatisCursorItemReader`` below.
     factory-ref="jobSqlSessionFactory"/>
 
 <!-- (2) (3) (4) -->
-<bean id="reader"
-      class="org.mybatis.spring.batch.MyBatisCursorItemReader" scope="step"
-      p:queryId="org.terasoluna.batch.functionaltest.app.repository.mst.CustomerRepository.findAll"
+<bean id="reader"class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+      p:queryId="org.terasoluna.batch.functionaltest.app.repository.mst.CustomerRepository.cursor"
       p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+<batch:job id="outputAllCustomerList01" job-repository="jobRepository">
+    <batch:step id="outputAllCustomerList01.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader"
+                         processor="retrieveBranchFromContextItemProcessor"
+                         writer="writer" commit-interval="10"/>
+            <!-- omitted -->
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
 ----
 
 [source,xml]
-.org/terasoluna/batch/functionaltest/app/repository/mst/CustomerRepository.xml
+.Mapper XML
 ----
-<!-- (5) -->
+<!-- (6) -->
 <mapper namespace="org.terasoluna.batch.functionaltest.app.repository.mst.CustomerRepository">
 
-    <!-- (6) -->
-    <select id="findAll"
-            resultType="org.terasoluna.batch.functionaltest.app.model.mst.Customer">
+    <!-- omitted -->
+
+    <!-- (7) -->
+    <select id="cursor" resultType="org.terasoluna.batch.functionaltest.app.model.mst.Customer">
         <![CDATA[
         SELECT
             customer_id AS customerId,
@@ -372,13 +407,182 @@ Show an example of usage of ``MyBatisCursorItemReader`` below.
 ----
 
 [source,java]
-.org.terasoluna.batch.functionaltest.app.repository.mst.CustomerRepository
+.Mapper interface
 ----
 public interface CustomerRepository {
-    // (7)
+    // (8)
     List<Customer> findAll();
 
     // omitted.
+}
+----
+
+[source,java]
+.ItemProcessor implementation
+----
+@Component
+@Scope("step")
+public class RetrieveBranchFromContextItemProcessor implements ItemProcessor<Customer, CustomerWithBranch> {
+    // omitted.
+
+    @Override
+    public CustomerWithBranch process(Customer item) throws Exception { // (9)
+        CustomerWithBranch newItem = new CustomerWithBranch(item);
+        newItem.setBranch(branches.get(item.getChargeBranchId())); // (10)
+        return newItem;
+    }
+}
+----
+
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Register Mapper XML.
+
+|(2)
+|Define ``MyBatisCursorItemReader``.
+
+|(3)
+|Specify the SQL ID defined in (7) with ``namespace`` + ``<method name>`` of (6) to the property of ``queryId``.
+
+|(4)
+|Specify ``SqlSessionFactory`` of the database to be accessed in ``sqlSessionFactory-ref`` property.
+
+|(5)
+|Specify ``MyBatisCursorItemReader`` defined in (2) in reader attribute.
+
+|(6)
+|Define Mapper XML. Match the value of namespace with the FQCN of the interface.
+
+|(7)
+|Define SQL.
+
+|(8)
+|Define the method corresponding to the SQL ID defined in (7) in interface. +
+In this example, ``branchId`` is passed as the parameter of search condition by @Param annotation. It is not required when there is no condition.
+
+|(9)
+|The item type received as an argument is
+``SalesPerformanceDetail`` that is input object type specified in ItemProcessor interface type argument implemented in this class.
+
+|(10)
+|Fetch the value of each column using the item passed to argument.
+
+|===
+
+[[Ch05_DBAccess_HowToUse_Input_MyBatisItemReader_Tasklet]]
+How to use in Tasklet model::
+
+Implementation example for referring to the database using ``MyBatisCursorItemReader`` in Tasklet model is shown below. +
+Here, implementation example of ``MyBatisCursorItemReader`` and implementation example of ``Tasklet`` for processing the data fetched from database using the implemented ``MyBatisCursorItemReader`` are explained.
+
+For the points to consider while using component of Chunk model in Tasklet model, refer to <<Ch03_CreateTaskletJob#Ch03_CreateTaskletJob_HowToUse_InOutImpl, Tasklet implementation that uses components of Chunk model>>.
+
+In Tasklet model, resource should be explicitly opened/closed unlike Chunk model in ``Tasklet`` implementation.
+Read input data explicitly.
+
+[source,xml]
+.Bean definition
+----
+<!-- (1) -->
+<mybatis:scan
+    base-package="org.terasoluna.batch.functionaltest.app.repository.plan"
+    factory-ref="jobSqlSessionFactory"/>
+
+<!-- (2) (3) (4) -->
+<bean id="summarizeDetails" class="org.mybatis.spring.batch.MyBatisCursorItemReader"
+          p:queryId="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository.summarizeDetails"
+          p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
+
+<batch:job id="customizedJobExitCodeTaskletJob" job-repository="jobRepository">
+    <batch:step id="customizedJobExitCodeTaskletJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager" ref="checkAmountTasklet"/>
+    </batch:step>
+    <!-- omitted -->
+</batch:job>
+----
+
+[source,xml]
+.Mapper XML
+----
+<!-- (5) -->
+<mapper namespace="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository">
+
+    <!-- omitted -->
+    
+    <!-- (6) -->
+    <select id="summarizeDetails" resultType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanSummary">
+        <![CDATA[
+        SELECT
+            branch_id AS branchId, year, month, SUM(amount) AS amount
+        FROM
+            sales_plan_detail
+        GROUP BY
+            branch_id, year, month
+        ORDER BY
+            branch_id ASC, year ASC, month ASC
+         ]]>
+    </select>
+    
+</mapper>
+----
+
+[source,java]
+.Mapper interface
+----
+public interface SalesPlanDetailRepository {
+
+    // (7)
+    List<SalesPlanSummary> summarizeDetails();
+
+    // omitted.
+}
+----
+
+[source,java]
+.Tasklelet implementation
+----
+@Component
+@Scope("step")
+public class CheckAmountTasklet implements Tasklet {
+    // (8)
+    @Inject
+    ItemStreamReader<SalesPlanSummary> reader;
+    
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+        SalesPlanSummary item = null;
+
+        List<SalesPlanSummary> items = new ArrayList<>(CHUNK_SIZE);
+        int errorCount = 0;
+
+        try {
+            // (9)
+            reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext());
+            while ((item = reader.read()) != null) { // (10)
+                if (item.getAmount().signum() == -1) {
+                    logger.warn("amount is negative. skip item [item: {}]", item);
+                    errorCount++;
+                    continue;
+                }
+
+                // omitted.
+            }
+            
+            // catch block is omitted.
+        } finally {
+            // (11)
+            reader.close();
+        }
+    }
+    // omitted.
+    
+    return RepeatStatus.FINISHED;
 }
 ----
 
@@ -398,7 +602,7 @@ public interface CustomerRepository {
 |Specify the SQL ID defined in (6) with ``namespace`` + ``<method name>`` of (5) to the property of ``queryId``.
 
 |(4)
-|Specify ``SqlSessionFactory`` of the database to be accessed in ``sqlSessionFactory-ref`` property.
+|Specify ``SqlSessionFactory`` of the database to be accessed in ``sqlSessionTemplate-ref`` property.
 
 |(5)
 |Define Mapper XML. Match the value of namespace with the FQCN of the interface.
@@ -409,112 +613,46 @@ public interface CustomerRepository {
 |(7)
 |Define the method corresponding to the SQL ID defined in (6) for the interface.
 
-|===
+|(8)
+|Assign ``@Inject`` annotation and inject ``ItemStreamReader`` implementation. +
+Since there is a need to open/close the target resource,
+inject implementation in ``ItemStreamReader`` interface wherein open/close method of resource is added to ``ItemReader``.
 
-[[Ch05_DBAccess_HowToUse_Output]]
-=== Database Access with ItemWriter
-Explain database access with ItemWriter in here.
+|(9)
+|Open input resource.
 
-[[Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter]]
-==== ItemWriter of MyBatis
-MyBatis-Spring provides only one following ItemWriter.
+|(10)
+|Read input data one by one.
 
-* ``org.mybatis.spring.batch.MyBatisBatchItemWriter``
-
-The basic setting is the same as <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader>>.
-``MyBatisBatchItemWriter`` needs to specify ``batchModeSqlSessionTemplate``
-described in <<Ch05_DBAccess_HowToUse_Config_MyBatisConfig>>.
-
-Show an example definition of ``MyBatisBatchItemWriter`` below.
-
-[source,xml]
-.META-INF/jobs/common/jobSalesPlan01.xml
-----
-<!-- (1) -->
-<mybatis:scan
-    base-package="org.terasoluna.batch.functionaltest.app.repository.plan"
-    factory-ref="jobSqlSessionFactory"/>
-
-<!-- (2) (3) (4) -->
-<bean id="detailWriter" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
-      p:statementId="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository.create"
-      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
-
-<!-- omitted -->
-----
-
-[source,xml]
-.org/terasoluna/batch/functionaltest/app/repository/plan/SalesPlanDetailRepository.xml
-----
-<!-- (5) -->
-<mapper namespace="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository">
-
-    <!-- (6) -->
-    <insert id="create"
-            parameterType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail">
-        <![CDATA[
-        INSERT INTO
-            sales_plan_detail(branch_id, year, month, customer_id, amount)
-        VALUES (
-            #{branchId}, #{year}, #{month}, #{customerId}, #{amount}
-        )
-        ]]>
-    </insert>
-
-    <!-- omitted -->
-</mapper>
-----
-
-[source,java]
-.org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository
-----
-public interface SalesPlanDetailRepository {
-
-    // (7)
-    void create(SalesPlanDetail salesPlanDetail);
-
-    // omitted.
-}
-----
-
-[cols="10,90", options="header"]
-.Description
-|===
-|Sr. No.
-|Description
-
-|(1)
-|Register Mapper XML.
-
-|(2)
-|Define ``MyBatisBatchItemWriter``.
-
-|(3)
-|Specify the SQL ID defined in (6) with ``namespace`` + ``<method name>`` of (5) to the property of ``statementId``.
-
-|(4)
-|Specify ``SessionTemplate`` of the database to be accessed in ``sqlSessionTemplate-ref`` property. +
-The specified ``SessionTemplate`` is mandatory that ``executorType`` is set to ``BATCH``.
-
-|(5)
-|Define Mapper XML. Match the value of namespace with the FQCN of the interface.
-
-|(6)
-|Define SQL.
-
-|(7)
-|Define the method corresponding to the SQL ID defined in (6) for the interface.
+|(11)
+|Close input resource. +
+Be sure to close the resource. When an exception occurs, the transaction of entire tasklet is rolled back,
+stack trace  of exception is output and the job ends abnormally. Therefore, exception handling should be implemented whenever required.
 
 |===
 
-[[Ch05_DBAccess_HowToUse_Processor]]
-=== Database Access other than ItemReader・ItemWriter
-Explain database access except for ItemReader・ItemWriter.
+[[Ch05_DBAccess_HowToUse_Input_MapperInterface]]
+==== Mapper interface (Input)
 
-To access the database except for ItemReader・ItemWriter, use the Mapper interface.
+Use Mapper interface for referring to the database except for ItemReader. +
+Here, database reference using Mapper interface is described.
+
+[[Ch05_DBAccess_HowToUse_Input_MapperInterface_Overview]]
+Functional overview::
+
 In using the Mapper interface, {batch5_shortname} has the following restrictions.
 
 .The available points of Mapper interface.
+
+It is possible to use ``MyBatisBatchItemWriter`` by Inject, but in that case Mapper interface itself can be processed with ``BATCH`` setting.
+  In other words, there is basically no need to use ``MyBatisBatchItemWriter`` by Inject.
+
+[[Ch05_DBAccess_HowToUse_Output_MapperInterface_Chunk]]
+How to use in Chunk model::
+
+Implementation example to update (register) database using Mapper interface in Chunk model is shown below.
+
+
 [cols="10,30,30,30", options="header"]
 |===
 |Process
@@ -554,19 +692,6 @@ Restrictions in Tasklet::
   It is possible to use ``MyBatisBatchItemWriter`` by Inject, but in that case Mapper interface itself can be processed with ``BATCH`` setting.
   In other words, there is basically no need to use ``MyBatisBatchItemWriter`` by Inject.
 
-Restrictions in Listener::
-  Even at the listener, the same restriction as that of ItemProcessor is established.
-  In addition, for listeners, use cases requiring updates are difficult to think. Therefore, update processing is prohibited at the listner.
-
-[NOTE]
-.Replacement of update processing assumed by the listner
-====
-Job state management::
-  It is done by JobRepository of {SB}
-Log output to database::
-  It should be done in the log Appender. It is necessary to manage it separately from the transaction of the job.
-====
-
 
 [[Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_ItemProcess]]
 ==== Database access with ItemProcessor
@@ -589,13 +714,8 @@ public class UpdateItemFromDBProcessor implements
         // (2)
         Customer customer = customerRepository.findOne(readItem.getCustomerId());
 
-        // (3)
-        SalesPlanDetail writeItem = new SalesPlanDetail();
-        writeItem.setBranchId(customer.getChargeBranchId());
-        writeItem.setYear(readItem.getYear());
-        writeItem.setMonth(readItem.getMonth());
-        writeItem.setCustomerId(readItem.getCustomerId());
-        writeItem.setAmount(readItem.getAmount());
+        // omitted
+        
         return writeItem;
     }
 }
@@ -604,33 +724,21 @@ public class UpdateItemFromDBProcessor implements
 [source,xml]
 .Bean definition
 ----
-<!-- (2) -->
+<!-- (3) -->
 <mybatis:scan
         base-package="org.terasoluna.batch.functionaltest.app.repository"
         template-ref="batchModeSqlSessionTemplate"/>
 
+<!-- (4) -->
 <bean id="reader" class="org.mybatis.spring.batch.MyBatisCursorItemReader"
       p:queryId="org.terasoluna.batch.functionaltest.app.repository.performance.SalesPerformanceDetailRepository.findAll"
       p:sqlSessionFactory-ref="jobSqlSessionFactory"/>
 
-<!-- (3) -->
-<bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
-      p:statementId="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository.create"
-      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
-
-<batch:job id="DBAccessByItemProcessor" job-repository="jobRepository">
-    <batch:step id="DBAccessByItemProcessor.step01">
-        <batch:tasklet transaction-manager="jobTransactionManager">
-            <!-- (4) -->
-            <batch:chunk reader="reader"
-                         processor="updateItemFromDBProcessor"
-                         writer="writer" commit-interval="10"/>
-        </batch:tasklet>
-    </batch:step>
-</batch:job>
+<!-- omitted job definition -->
 ----
 
-Mapper interface and Mapper XML are omitted.
+Job definition of Mapper interface and Mapper XML is omitted since the contents other than those mentioned in
+<<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader>> need not be specified.
 
 [cols="10,90"]
 .Description
@@ -642,18 +750,17 @@ Mapper interface and Mapper XML are omitted.
 |Inject Mapper interface.
 
 |(2)
+|Execute search process in Mapper interface.
+
+(3)
 |Register Mapper XML. +
 By specifying ``batchModeSqlSessionTemplate`` set as ``BATCH`` in ``template-ref`` attribute,
 database access with ItemProcessor is ``BATCH``.
-if you set ``factory-ref="jobSqlSessionFactory"``, it conflicts with the above restriction
-and an exception is thrown when ``MyBatisBatchItemWriter`` is executed.
-
-|(3)
-|Define ``MyBatisBatchItemWriter`` +
-Specify ``batchModeSqlSessionTemplate`` set as ``BATCH`` in ``sqlSessionTemplate-ref`` property.
 
 |(4)
-|Set ItemProcessor that injected Mapper interface.
+|Define ``MyBatisCursorItemReader`` +
+Specify ``SqlSessionFactory`` of the database to be accessed in ``sqlSessionFactory-ref`` property.
+
 
 |===
 
@@ -661,7 +768,7 @@ Specify ``batchModeSqlSessionTemplate`` set as ``BATCH`` in ``sqlSessionTemplate
 .Supplement of MyBatisCursorItemReader setting
 ====
 Different ``ExecutorType`` can be used for MyBatisCursorItemReader and MyBatisBatchItemWriter like the definition example below.
-This is because the opening of the resource by MyBatisCursorItemReader is done before the start of the transaction.
+This is because the transaction by MyBatisCursorItemReader is done different from the transaction by ItemWriter.
 [source,xml]
 ----
 <bean id="reader" class="org.mybatis.spring.batch.MyBatisCursorItemReader"
@@ -674,12 +781,13 @@ This is because the opening of the resource by MyBatisCursorItemReader is done b
 ----
 ====
 
-[[Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_Tasklet]]
-==== Database Access with Tasklet
-Show an example of database access in Tasklet.
+[[Ch05_DBAccess_HowToUse_Input_MapperInterface_Tasklet]]
+How to use in Tasklet model::
+
+Implementation example for referring to the database using Mapper interface in Tasklet model is shown below.
 
 [source,java]
-.Implementation example with Tasklet
+.Implementation example of Tasklet
 ----
 @Component
 public class OptimisticLockTasklet implements Tasklet {
@@ -695,17 +803,523 @@ public class OptimisticLockTasklet implements Tasklet {
             ChunkContext chunkContext) throws Exception {
 
         Branch branch = repository.branchFindOne(branchId); // (2)
-        ExclusiveBranch exclusiveBranch = new ExclusiveBranch();
+        
 
+        // omitted.
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+[source,xml]
+.Bean definition
+----
+<!-- (3) -->
+<mybatis:scan
+        base-package="org.terasoluna.batch.functionaltest.ch05.exclusivecontrol.repository"
+        factory-ref="jobSqlSessionFactory"/>
+
+<batch:job id="taskletOptimisticLockCheckJob" job-repository="jobRepository">
+    <batch:step id="taskletOptimisticLockCheckJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager"
+                       ref="optimisticLockTasklet"> <!-- (4) -->
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+It is omitted for Mapper interface and Mapper XML since the contents other than those mentioned in
+<<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader>> need not be specified.
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Inject Mapper interface.
+
+|(2)
+|Execute the search process in Mapper interface.
+
+|(3)
+|Register Mapper XML. +
+Specify ``jobSqlSessionFactory`` set as ``REUSE`` in ``factory-ref`` attribute.
+
+|(4)
+|Inject Mapper interface and set Tasklet.
+
+|===
+
+[[Ch05_DBAccess_HowToUse_Output]]
+=== Output
+
+
+Output of database access is described as follows.
+
+. <<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter>>
+.. <<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Overview, Functional overview>>
+.. <<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Chunk, How to use in Chunk model>>
+.. <<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Tasklet, How to use in Tasklet model>>
+. <<Ch05_DBAccess_HowToUse_Output_MapperInterface>>
+.. <<Ch05_DBAccess_HowToUse_Output_MapperInterface_Overview, Functional overview>>
+.. <<Ch05_DBAccess_HowToUse_Output_MapperInterface_Chunk, How to use in Chunk model>>
+.. <<Ch05_DBAccess_HowToUse_Output_MapperInterface_Tasklet, How to use in Tasklet model>>
+
+[[Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter]]
+==== MyBatisBatchItemWriter
+
+Here, database access by ``MyBatisBatchItemWriter`` provided as ItemWriter by MyBatis-Spring
+is explained.
+
+[[Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Overview]]
+Functional overview::
+
+MyBatis-Spring provides only one ItemWriter as shown below.
+
+* ``org.mybatis.spring.batch.MyBatisBatchItemWriter``
+
+``MyBatisBatchItemWriter``is an ItemWriter that uses batch update function of JDBC by linking with MyBatis
+and performance is expected to be improved when updating large amount of data at a time. +
+basic configuration is same as <<Ch05_DBAccess_HowToUse_Input_MyBatisItemReader>>.
+In ``MyBatisBatchItemWriter``, ``batchModeSqlSessionTemplate`` described in <<Ch05_DBAccess_HowToUse_Config_MyBatisConfig>>
+should be specified.
+
+Implementation example for updating database using ``MyBatisBatchItemWriter`` is shown below.
+
+[[Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Chunk]]
+How to use in Chunk model::
+
+Implementation example for updating (registering) database using ``MyBatisBatchItemWriter`` in Chunk model is shown below. +
+Here, implementation example of ``MyBatisBatchItemWriter`` and implementation example of ``ItemProcessor`` for processing the data fetched from database using the implemented ``MyBatisBatchItemWriter`` are explained.
+In ``ItemProcessor`` implementation, the fetched data is updated in database using ``MyBatisBatchItemWriter``.
+
+[source,xml]
+.Bean definition
+----
+<!-- (1) -->
+<mybatis:scan
+    base-package="org.terasoluna.batch.functionaltest.ch05.exclusivecontrol.repository"
+    factory-ref="jobSqlSessionFactory"/>
+
+<!-- (2) (3) (4) -->
+<bean id="writer"
+      class="org.mybatis.spring.batch.MyBatisBatchItemWriter" scope="step"
+      p:statementId="org.terasoluna.batch.functionaltest.ch05.exclusivecontrol.repository.ExclusiveControlRepository.branchExclusiveUpdate"
+      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"
+      p:assertUpdates="#{new Boolean(jobParameters['assertUpdates'])}"/>
+
+<batch:job id="chunkOptimisticLockCheckJob" job-repository="jobRepository">
+    <batch:step id="chunkOptimisticLockCheckJob.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader" processor="branchEditItemProcessor"
+                         writer="writer" commit-interval="10"/> <!-- (5) -->
+        </batch:tasklet>
+    </batch:step>
+</batch:job>
+----
+
+[source,xml]
+.Mapper XML
+----
+<!-- (6) -->
+<mapper namespace="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository">
+
+    <!-- (7) -->
+    <insert id="create"
+            parameterType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail">
+        <![CDATA[
+        INSERT INTO
+            sales_plan_detail(branch_id, year, month, customer_id, amount)
+        VALUES (
+            #{branchId}, #{year}, #{month}, #{customerId}, #{amount}
+        )
+        ]]>
+    </insert>
+
+    <!-- omitted -->
+</mapper>
+----
+
+[source,java]
+.Mapper interface
+----
+public interface SalesPlanDetailRepository {
+
+    // (8)
+    void create(SalesPlanDetail salesPlanDetail);
+
+    // omitted.
+}
+----
+
+[source,java]
+.ItemProcessor implementation
+----
+@Component
+@Scope("step")
+public class BranchEditItemProcessor implements ItemProcessor<Branch, ExclusiveBranch> {
+    // omitted.
+
+    @Override
+    public ExclusiveBranch process(Branch item) throws Exception { // (9)
+        ExclusiveBranch branch = new ExclusiveBranch();
+        branch.setBranchId(item.getBranchId());
+        branch.setBranchName(item.getBranchName() + " - " + identifier);
+        branch.setBranchAddress(item.getBranchAddress() + " - " + identifier);
+        branch.setBranchTel(item.getBranchTel());
+        branch.setCreateDate(item.getUpdateDate());
+        branch.setUpdateDate(new Timestamp(clock.millis()));
+        branch.setOldBranchName(item.getBranchName());
+        
+        // (10)
+        return branch;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.説明
+|===
+|項番
+|説明
+
+|(1)
+|Register Mapper XML.
+
+|(2)
+|Define ``MyBatisBatchItemWriter``.
+
+|(3)
+|Specify the SQL ID defined in (7) with ``namespace`` + ``<method name>`` of (6) to the property of ``statementId``.
+
+|(4)
+|Specify ``SessionTemplate`` of the database to be accessed in ``sqlSessionTemplate-ref`` property. +
+For ``SessionTemplate`` to be specified, it is mandatory to set ``executorType`` to ``BATCH``.
+
+|(5)
+|Specify ``MyBatisBatchItemWriter`` defined in (2) in writer attribute.
+
+|(6)
+|Define Mapper XML. Match the value of namespace with the FQCN of the interface.
+
+|(7)
+|Define SQL.
+
+|(8)
+|Define the method corresponding to the SQL ID defined in (7) in interface.
+
+|(9)
+|The return value type is ``ExclusiveBranch`` that is output object specified in ItemProcessor interface type argument implemented in this class.
+
+|(10)
+|By returning DTO object that sets update data, output the data to database.
+
+|===
+
+[[Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter_Tasklet]]
+How to use in Tasklet model::
+
+Implementation example for updating (registering) database using ``MyBatisBatchItemWriter`` in Tasklet model is shown below. +
+Here, implementation example of ``MyBatisBatchItemWriter`` and implementation example of ``Tasklet`` using the implemented ``MyBatisBatchItemWriter`` are explained.
+For the points to keep in mind while using component of Chunk model in Tasklet model, refer to <<Ch03_CreateTaskletJob#Ch03_CreateTaskletJob_HowToUse_InOutImpl, Tasklet implementation that uses component of Chunk model>>.
+
+[source,xml]
+.Bean definition
+----
+<!-- (1) -->
+<mybatis:scan base-package="org.terasoluna.batch.functionaltest.app.repository.plan"
+            factory-ref="jobSqlSessionFactory"/>
+
+<!-- (2) (3) (4) -->
+<bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+          p:statementId="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository.create"
+          p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+<batch:job id="taskletJobWithListenerWithinJobScope" job-repository="jobRepository">
+    <batch:step id="taskletJobWithListenerWithinJobScope.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager" ref="salesPlanDetailRegisterTasklet"/>
+    </batch:step>
+    <!-- omitted. -->
+</batch:job>
+----
+
+[source,xml]
+.Mapper XML
+----
+<!-- (5) -->
+<mapper namespace="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository">
+
+    <!-- (6) -->
+    <insert id="create" parameterType="org.terasoluna.batch.functionaltest.app.model.plan.SalesPlanDetail">
+        <![CDATA[
+        INSERT INTO
+            sales_plan_detail(branch_id, year, month, customer_id, amount)
+        VALUES (
+            #{branchId}, #{year}, #{month}, #{customerId}, #{amount}
+        )
+        ]]>
+    </insert>
+
+    <!-- omitted -->
+</mapper>
+----
+
+[source,java]
+.Mapper interface
+----
+public interface SalesPlanDetailRepository {
+    // (7)
+    void create(SalesPlanDetail salesPlanDetail);
+
+    // omitted.
+}
+----
+
+[source,java]
+.Tasklet implementation
+----
+@Component
+@Scope("step")
+public class SalesPlanDetailRegisterTasklet implements Tasklet {
+    
+    // omitted.
+    
+    // (8)
+    @Inject
+    ItemWriter<SalesPlanDetail> writer;
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
+        SalesPlanDetail item = null;
+
+        try {
+            reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext());
+
+            List<SalesPlanDetail> items = new ArrayList<>(); // (9)
+
+            while ((item = reader.read()) != null) {
+
+                items.add(processor.process(item)); // (10)
+                if (items.size() == 10) {
+                    writer.write(items); // (11)
+                    items.clear();
+                }
+            }
+            // omitted.
+        }
+        // omitted.
+
+        return RepeatStatus.FINISHED;
+    }
+}
+----
+
+For Mapper interface and Mapper XML is omitted since the contents other than those mentioned in
+<<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter>> need not be specified.
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Register Mapper XML.
+
+|(2)
+|Define ``MyBatisBatchItemWriter``.
+
+|(3)
+|Specify the SQL ID defined in (6) with ``namespace`` + ``<method name>`` of (5) to the property of ``statementId``.
+
+|(4)
+|Specify ``SessionTemplate`` of the database to be accessed in ``sqlSessionTemplate-ref`` property. +
+It is mandatory to set ``executorType`` to ``BATCH`` for ``SessionTemplate`` to be specified.
+
+|(5)
+|Define Mapper XML. Match the value of namespace with the FQCN of the interface.
+
+|(6)
+|Define SQL.
+
+|(7)
+|Define the method corresponding to the SQL ID defined in (6) for the interface.
+
+|(8)
+|Assign ``@Inject`` annotation and inject ``ItemWriter`` implementation. +
+Unlike ``ItemReader``, open/close of resource is not required for updating database so inject in ``ItemWriter`` interface and not ``ItemStreamWriter``.
+
+|(9)
+|Define list that stores output data. +
+``ItemWriter`` outputs fixed number of data collectively.
+
+|(10)
+|Set update data in list.
+
+|(11)
+|Specify the list wherein update data is set, as an argument and output to database.
+
+|===
+
+[[Ch05_DBAccess_HowToUse_Output_MapperInterface]]
+==== Mapper interface (Output)
+
+Use Mapper interface for updating the database except for ItemWriter. +
+Here, database update using Mapper interface is described.
+
+[[Ch05_DBAccess_HowToUse_Output_MapperInterface_Overview]]
+Functional overview::
+
+For the restrictions on {batch5_shortname} after database is accessed by using Mapper interface, refer to <<Ch05_DBAccess_HowToUse_Input_MapperInterface>>. +
+Moreover, there are following restrictions in ItemProcessor and Tasklet while updating the database using Mapper interface.
+
+Restrictions in ItemProcessor::
+  There is a restriction that it should not be executed with two or more ``ExecutorType`` within the same transaction in MyBatis. +
+  If "Use ``MyBatisBatchItemWriter`` in ItemWriter" and "Refer and update using Mapper interface in ItemProcessor"
+  are satisfied at the same time, it conflicts with this restriction. +
+  To avoid this restriction, database is accessed by using Mapper interface
+  wherein ``ExecutorType`` is ``BATCH`` in ItemProcessor. +
+  In addition, ``MyBatisBatchItemWriter`` checks whether it is SQL issued by itself with the status check after executing SQL,
+  but naturally since it cannot manage SQL execution by ItemProcessor, an error occurs. +
+  Therefore, if ``MyBatisBatchItemWriter`` is used, updating by Mapper interface will not be possible but only reference.
+
+[CAUTION]
+====
+It can set to invalidate the error check of ``MyBatisBatchItemWriter``, but the setting is prohibited because there is a possibility that unexpected behavior may occur.
+====
+
+Restrictions in Tasklet::
+   In Tasklet, since it is basic to use the Mapper interface, there is no influence like ItemProcessor. +
+   It is possible to use ``MyBatisBatchItemWriter`` by Inject, but in that case Mapper interface itself can be processed with ``BATCH`` setting.
+   In other words, there is basically no need to use ``MyBatisBatchItemWriter`` by Inject.
+
+[[Ch05_DBAccess_HowToUse_Output_MapperInterface_Chunk]]
+How to use in Chunk model::
+
+Implementation example for updating (registering) database using Mapper interface in Chunk model is shown below.
+
+[source,java]
+.Implementation example with ItemProcessor
+----
+@Component
+public class UpdateCustomerItemProcessor implements ItemProcessor<Customer, Customer> {
+    
+    // omitted.
+    
+    // (1)
+    @Inject
+    DBAccessCustomerRepository customerRepository;
+
+    @Override
+    public Customer process(Customer item) throws Exception {
+        item.setCustomerName(String.format("%s updated by mapper if", item.getCustomerName()));
+        item.setCustomerAddress(String.format("%s updated by item writer", item.getCustomerAddress()));
+        item.setUpdateDate(new Timestamp(clock.millis()));
+
+        // (2)
+        long cnt = customerRepository.updateName(item);
+
+        // omitted.
+
+        return item;
+    }
+}
+----
+
+[source,xml]
+.Bean definition
+----
+<!-- (3) -->
+<mybatis:scan
+        base-package="org.terasoluna.batch.functionaltest.ch05.dbaccess.repository;org.terasoluna.batch.functionaltest.app.repository"
+        template-ref="batchModeSqlSessionTemplate"/>
+
+<!-- (4) -->
+<bean id="writer" class="org.mybatis.spring.batch.MyBatisBatchItemWriter"
+      p:statementId="org.terasoluna.batch.functionaltest.app.repository.plan.SalesPlanDetailRepository.create"
+      p:sqlSessionTemplate-ref="batchModeSqlSessionTemplate"/>
+
+    <batch:job id="updateMapperAndItemWriterBatchModeJob" job-repository="jobRepository">
+        <batch:step id="updateMapperAndItemWriterBatchModeJob.step01">
+            <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader"
+                         processor="updateCustomerItemProcessor"
+                         writer="writer" commit-interval="10"/> <!-- (5) -->
+        </batch:tasklet>
+    </batch:step>
+    <!-- omitted -->
+</batch:job>
+----
+
+It is omitted for Mapper interface and Mapper XML since the contents other than those mentioned in
+<<Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter>> need not be specified.
+
+[cols="10,90"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Inject Mapper interface.
+
+|(2)
+|Generate DTO object, set update data and update database by returning DTO object.
+
+|(3)
+|Register Mapper XML. +
+By specifying ``batchModeSqlSessionTemplate`` set as ``BATCH`` in ``template-ref`` attribute, database access with ItemProcessor is ``BATCH``.
+Here, when ``factory-ref="jobSqlSessionFactory"`` is set, it conflicts with the earlier mentioned restriction causing an exception at the time of executing ``MyBatisBatchItemWriter``.
+
+|(4)
+|Define ``MyBatisBatchItemWriter``. +
+Specify ``batchModeSqlSessionTemplate`` set as ``BATCH`` in ``sqlSessionTemplate-ref`` property.
+
+|(5)
+|Specify ``MyBatisBatchItemWriter`` defined in (4) in writer attribute.
+
+|===
+
+[[Ch05_DBAccess_HowToUse_Output_MapperInterface_Tasklet]]
+How to use in Tasklet model::
+
+Implementation example for updating (registering) database using Mapper interface in Tasklet model is shown below.
+
+[source,java]
+.Implementation example of Tasklet
+----
+@Component
+public class OptimisticLockTasklet implements Tasklet {
+
+    // (1)
+    @Inject
+    ExclusiveControlRepository repository;
+
+    // omitted.
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+            ChunkContext chunkContext) throws Exception {
+
+        Branch branch = repository.branchFindOne(branchId);
+        
+        // (2)
+        ExclusiveBranch exclusiveBranch = new ExclusiveBranch();
         exclusiveBranch.setBranchId(branch.getBranchId());
         exclusiveBranch.setBranchName(branch.getBranchName() + " - " + identifier);
         exclusiveBranch.setBranchAddress(branch.getBranchAddress() + " - " + identifier);
         exclusiveBranch.setBranchTel(branch.getBranchTel());
         exclusiveBranch.setCreateDate(branch.getUpdateDate());
-        exclusiveBranch.setUpdateDate(new Timestamp(System.currentTimeMillis()));
+        exclusiveBranch.setUpdateDate(new Timestamp(clock.millis()));
         exclusiveBranch.setOldBranchName(branch.getBranchName());
 
-        int result = repository.branchExclusiveUpdate(exclusiveBranch); // (3)
+        // (3)
+        int result = repository.branchExclusiveUpdate(exclusiveBranch);
+
+        // omitted.
 
         return RepeatStatus.FINISHED;
     }
@@ -731,7 +1345,7 @@ public class OptimisticLockTasklet implements Tasklet {
 
 Mapper interface and Mapper XML are omitted.
 
-[cols="10,90"]
+[cols="10,90", options="header"]
 .Description
 |===
 |Sr. No.
@@ -741,13 +1355,13 @@ Mapper interface and Mapper XML are omitted.
 |Inject Mapper interface.
 
 |(2)
-|Execute the search process with the Mapper interface.
+|Generate DTO object and set update data.
 
 |(3)
-|Execute the update process with the Mapper interface.
+|Specify DTO object wherein update data is set, as an argument and execute update process in Mapper intrface.
 
 |(4)
-|Register Mapper XML +
+|Register Mapper XML. +
 Specify ``jobSqlSessionFactory`` set as ``REUSE`` in ``factory-ref`` attribute.
 
 |(5)
@@ -755,23 +1369,25 @@ Specify ``jobSqlSessionFactory`` set as ``REUSE`` in ``factory-ref`` attribute.
 
 |===
 
-[NOTE]
-.Use batchModeSqlSessionTemplate
-====
-If there are many updating processes with the tasklet model, set ``batchModeSqlSessionTemplate`` in ``factory-ref`` attribute.
-As a result, batch update processing is performed, so performance improvement can be expected.
-However, be aware that executing batch updates requires ``flush`` explicitly.
-For details,
-please refer to
-{server5_url}/ArchitectureInDetail/DataAccessDetail/DataAccessMyBatis3.html#dataaccessmybatis3howtoextendexecutortypebatchnotes[Precautions when using batch mode Repository].
-====
-
-
-[[Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_listener]]
-==== Database Access with Listener
+[[Ch05_DBAccess_HowToUse_MapperInterface_Listener]]
+=== Database access with Listener
 Database access with listener is often linked with other components.
-Depending on the listener to be used and the implementation method,
-It is necessary to prepare additional mechanism to hand over to other components.
+Depending on the listener to be used and the implementation method, it is necessary to prepare
+additional mechanism to hand over the fetched data in Mapper interface to other components.
+
+There are following restrictions for implementing database access using Mapper interface in listener.
+
+Restrictions in listener::
+  There are same restictions as that in ItemProcessor even in Listener.
+  In addition, for listeners, use cases requiring updates are difficult to think. Therefore, update processing is not recommended in the listner.
+
+[NOTE]
+.Replace update process assumed in listener
+====
+Job status management::
+  It is performed by JobRepository of {SB}
+Log output to database::
+  It should be implemented in Appender of log. It should be managed separately from the transaction of job.
 
 Show an example in which <<Ch04_Listener.adoc#Ch04_Listener_Overview_Types_StepExecutionListener,StepExecutionListener>>
 acquires data before step execution and uses the data acquired by ItemProcessor.
@@ -1131,3 +1747,89 @@ which is explained in <<Ch05_Transaction.adoc#Ch05_Transaction_HowToUse_MultiDat
 Further, since CompositeItemWriter can be linked in case of ItemWriter implementation,
 it can be done along with database output and file output by setting MyBatisBatchItemWriter and FlatFileItemWriter.
 ====
+
+[[Ch05_DBAccess_HowToExtend_SearchCondition]]
+=== How to specify search condition
+When search is to be performed by specifying search conditions while accessing database,
+search condition can be specified by fetching value from job parameters in Map format in Bean definition and setting as key.
+Job start command example wherein job parameters are specified and implementation example are shown below.
+
+[source,sh]
+.Job start command when job parameters are specified
+----
+$ java -cp ${CLASSPATH} org.springframework.batch.core.launch.support.CommandLineJobRunner /META-INF/job/job001 job001 year=2017 month=12
+----
+
+[source,xml]
+.Implementation example of MapperXML
+----
+<!-- (1) -->
+<select id="findByYearAndMonth"
+    resultType="org.terasoluna.batch.functionaltest.app.model.performance.SalesPerformanceSummary">
+    <![CDATA[
+    SELECT
+        branch_id AS branchId, year, month, amount
+    FROM
+        sales_performance_summary
+    WHERE
+        year = #{year} AND month = #{month}
+    ORDER BY
+        branch_id ASC
+    ]]>
+</select>
+
+<!-- omitted -->
+
+----
+
+[source,xml]
+.Bean definition
+----
+
+<!-- omitted -->
+
+<!-- (2) -->
+<bean id="reader"
+      class="org.mybatis.spring.batch.MyBatisCursorItemReader" scope="step"
+      p:queryId="org.terasoluna.batch.functionaltest.ch08.parallelandmultiple.repository.SalesSummaryRepository.findByYearAndMonth"
+      p:sqlSessionFactory-ref="jobSqlSessionFactory">
+    <property name="parameterValues"> <!-- (3) -->
+        <map>
+            <!-- (4) -->
+            <entry key="year" value="#{jobParameters['year']}" value-type="java.lang.Integer"/>
+            <entry key="month" value="#{jobParameters['month']}" value-type="java.lang.Integer"/>
+
+            <!-- omitted -->
+        </map>
+    </property>
+</bean>
+
+<!-- omitted -->
+
+----
+
+[cols="10,90",options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Specify search conditions and define the SQL to be fetched.
+
+|(2)
+|Define ``ItemReader`` to fetch data from database.
+
+|(3)
+|Set ``parameterValues`` to property name.
+
+|(4)
+|Specify search conditions by fetching the values to be specified in search condition from job parameters and setting to key.
+Since SQL arguments are defined as numeric type, they are converted to ``Integer`` by ``value-type`` and passed.
+
+|===
+
+[NOTE]
+.How to specify search by StepExectionContext
+====
+When search condition is to be specified in pre-processing of job  such as @BeforeStep, the data can be fetched same as ``JobParameters`` by setting it to ``StepExecutionContext``.

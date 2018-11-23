@@ -115,7 +115,7 @@ For this point, <<Ch07_JobManagement.adoc#, Job management>> should also be read
 
 * "Use ``MyBatisBatchItemWriter`` in ItemWriter" and "Update reference using Mapper interface in ItemProcessor" cannot be done at the same time.
 ** There is a restriction in MyBatis of not executing with two or more `` ExecutorType`` in the same transaction.
-Refer to <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor,Database access of other than ItemReader/ItemWriter>>.
+Refer to <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface, Mapper interface(Input)>>.
 * Notes on input/output of database to the same table
 ** As the result of losing the information that guarantees reading consistency due to output (issue of UPDATE), error may occur in the input (SELECT). Consider the following measures.
 *** It depends on the database so, increase the area to secure the information.
