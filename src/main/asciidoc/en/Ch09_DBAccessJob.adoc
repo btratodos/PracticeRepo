@@ -478,7 +478,7 @@ Specify a base package which stores Repository interface, in ``base-package`` at
 |Configure ItemReader. +
 Specify ``org.mybatis.spring.batch.MyBatisCursorItemReader`` provided by MyBatis-Spring - a Spring linkage library offered by MyBatis, in ``class`` attribute.
 Use ``MyBatisCursorItemReader`` to fetch a large amount of data from the database.
-For details, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Database access in ItemReader>>. +
+For details, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Input>>. +
 Specify ``namespace``+``id`` for SQL set in MapperXML file, in ``queryId`` attribute.
 
 |(3)
@@ -493,8 +493,9 @@ Specify ``namespace``+``id`` for SQL set in MapperXML file, in ``queryId`` attri
 ====
 A method which uses Mapper interface is adopted as a method to access database other than ItemReader or ItemWriter.
 Since restrictions are set as {batch5_shortname} while using Mapper interface, 
-<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor, Accessing database other than ItemReader/ItemWriter>> should be referred.
-For ItemProcessor implementation, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_ItemProcess, Database access in ItemProcessor>>.
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface,Mapper Interface (Input)>>, <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MapperInterface,Mapper Interface (Output)>> should be referred.
+For ItemProcessor implementation example, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface_Chunk, How to use in chunk model>>(Input),
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface_Chunk,How to use in chunk model>>(Input).
 ====
 
 [[Ch09_DBAccessJob_Chunk_Logic]]
@@ -1064,8 +1065,9 @@ for whether to use various components of chunk model during Tasklet implementati
 ====
 A method which use Mapper interface is adopted as a method to access database other than ItemReader and ItemWriter.
 Since restrictions are set as {batch5_shortname} while using Mapper interface,
-<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Processor, Database access other than ItemReader and ItemWriter>> should be referred.
-For Tasklet implementation, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisMapperInterface_Tasklet, database access in Tasklet>>.
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface,Mapper Interface (Input)>>, <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MapperInterface,Mapper Interface (Output)>> should be referred.
+For Tasklet implementation example, refer <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input_MapperInterface_Tasklet, How to use in tasklet model>>(Input),
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MapperInterface_Tasklet, How to use in tasklet model>>(Output).
 ====
 
 [[Ch09_DBAccessJob_Tasklet_Logic]]

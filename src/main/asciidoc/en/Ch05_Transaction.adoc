@@ -248,7 +248,7 @@ it is also possible to update the processing throughput collectively by chunk un
 At that time, you can also use BatchUpdate by setting ``executorType`` of ``SqlSessionTemplate`` to ``BATCH``.
 This is the same behavior as using MyBatis' ItemWriter, so you can update it using MyBatis' ItemWriter.
 For details of MyBatis' ItemWriter, refer to
-<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter,Database access with ItemWriter>>.
+<<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output_MyBatisItemWriter,MyBatisBatchItemWriter>>.
 ====
 
 //^

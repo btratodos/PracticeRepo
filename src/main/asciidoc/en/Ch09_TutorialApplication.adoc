@@ -86,51 +86,48 @@ Correspondence table for Functions and processing methods used in A~F jobs, and 
 |Start job > <<Ch04_Listener.adoc#Ch04_Listener, Listener>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
 
 |5
-|Data input/output > Transaction control > <<Ch05_Transaction.adoc#Ch05_Transaction_architecture_UnderSpringBatch, Transaction control in {SB}>> |[red]#Chunk# [blue]#Tasklet# | | | | |
+|Data input/output > Transaction control > <<Ch05_Transaction.adoc#Ch05_Transaction_Arch_UnderSpringBatch, Transaction control in {SB}>> |[red]#Chunk# [blue]#Tasklet# | | | | |
 
 |6
 |Data input/output > Transaction control > Single data source > <<Ch05_Transaction.adoc#Ch05_Transaction_HowToUse_SingleDataSource_Tx, Implementing transaction control>> |[red]#Chunk# [blue]#Tasklet# | | | | |
 
 |7
-|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Database access in ItemReader>> |[red]#Chunk# | | | | |
+|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Input, Input>> |[red]#Chunk# [blue]#Tasklet# | | | | |
 
 |8
-|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output, Database access in ItemWriter>> |[red]#Chunk# | | | | |
+|Data input/output > Database access > <<Ch05_DBAccess.adoc#Ch05_DBAccess_HowToUse_Output, Output>> |[red]#Chunk# [blue]#Tasklet# | | | | |
 
 |9
-|Application development flow > Create Tasklet model job > <<Ch03_CreateTaskletJob.adoc#Ch03_CreateTaskletJob_HowToUse_Implements_InOut, Tasklet implementation which use components of chunk model>> |[blue]#Tasklet# | | | | |
+|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_HowToUse_FixedLength_Input, Input>> | |[red]#Chunk# [blue]#Tasklet# | | | | |
 
 |10
-|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Input, Input>> | |[red]#Chunk# [blue]#Tasklet# | | | |
+|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_HowToUse_FixedLength_Output, Output>> | |[red]#Chunk# [blue]#Tasklet# | | | |
 
 |11
-|Data input/output > File access > Variable length record > <<Ch05_FileAccess.adoc#Ch05_FileAccess_VariableLength_Output, Output>> | |[red]#Chunk# [blue]#Tasklet# | | | |
-
-|12
 |Handling abnormalities > <<Ch06_InputValidation.adoc#Ch06_InputValidation, Input check>> | | |[red]#Chunk# [blue]#Tasklet# | |[red]#Chunk# [blue]#Tasklet# |
 
+|12
+|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_StepExceptionHandling_ChunkListener, Exception handling by ChunkListener interface>> | | | |[red]#Chunk# [blue]#Tasklet# | |
+
 |13
-|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_ChunkListener, Exception handling by using ChunkListener interface>> | | | |[red]#Chunk# [blue]#Tasklet# | |
+|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_StepExceptionHandling_Chunk,Exception handling in chunk model>> | | | |[red]#Chunk# |
 
 |14
-|Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Chunk, Exception handling in chunk model>> | | | | |[red]#Chunk# |
-
-|15
 |Handling abnormalities > Exception handling > Step unit exception handling > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_HowToUse_ExceptionHandling_Tasklet, Exception handling in tasklet model>> | | | | |[blue]#Tasklet# |
 
-|16
+|15
 |Handling abnormalities > Exception handling > Determine whether to continue processing > <<Ch06_ExceptionHandling#Ch06_ExceptionHandling_Overview_Deal_Skip, Skip>> | | | | |[red]#Chunk# [blue]#Tasklet# |
 
+|16
+|Job management > Job status management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_JobStatusManagement_Retrieve, Verify job status and execution results>> | | | | | |[red]#Chunk# [blue]#Tasklet#
+
 |17
-|Job management > Job status management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_JobStatusManagement_Retrieve, Verify job status and execution results>> | | | | | |[red]#Chunk# [blue]#Tasklet#
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_ExitCode, Customize exit code>> | | | | |[red]#Chunk# [blue]#Tasklet# |
 
 |18
-|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_ExitCode, Customize exit code>> | | | | |[red]#Chunk# [blue]#Tasklet# |
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_Logging, Logging>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
 
 |19
-|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_Logging, Logging>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
-
-|20
-|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_MessageManagement, Message management>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
+|Job management > <<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_MessageManagement, Message management>> | | | |[red]#Chunk# [blue]#Tasklet# |[red]#Chunk# [blue]#Tasklet# |
 
 |===
