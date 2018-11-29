@@ -41,7 +41,7 @@ Explain the main comparisons below.
 
 |Setting error messages
 2+^|Same as
-{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html?highlight=validationmessages#validation-message-def[Definition of error messages] in {server5_guide}.
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html#validation-message-def[Definition of error messages] in {server5_guide}.
 
 |Error message output destination
 |View
@@ -192,7 +192,7 @@ These have already been set in the blank project provided by {batch5_shortname}.
 
 As mentioned earlier, for setting of error messages,
 refer to
-{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html?highlight=validationmessages#validation-message-def[Definition of error messages] in {server5_guide}.
+{server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html#validation-message-def[Definition of error messages] in {server5_guide}.
 
 [[Ch06_InputValidation_HowToUse_defRules]]
 === Input validation rule definition
@@ -520,3 +520,97 @@ When an input validation error occurs, in order to distinguish between the case 
 If data with input validation error is skipped, setting of exit code is required even when abnormal termination occurs.
 
 For details on how to set the exit code, refer to <<Ch07_JobManagement.adoc#,Job Management>>.
+
+[[Ch06_InputValidation_HowToUse_ErrorHandling_ErrorMessage]]
+==== Output error messages
+
+When input validation error occurs, use MessageSource to output any error message.
+For setting error messages,
+refer to {server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html#validation-message-def[Definition of error messages] in {server5_guide}.
+Implement as follows to output error messages.
+
+There are following 2 methods to output error messages in 1 record.
+
+. Output all the error messages collectively as 1.
+. Output error message for each item in the record.
+
+In the example, implement by the method to output error message of each item.
+
+
+* Capture ``ValidationException`` exception that occurs in input validation error by ``try/catch``.
+* Get ``org.springframework.validation.BindException`` by ``getCause`` method of ``ValidationException``.
+** Since ``BindException`` ``implements`` ``BindResult``, it is possible to get ``FiledError``.
+* Get ``FiledError`` repeatedly one by one for the number of errors by ``getFieldErrors`` method.
+* Consider the fetched ``FieldError`` as an argument and output error messages one by one by ``MessageSource``.
+
+[source,java]
+.Output example of error messages by MessageSource
+----
+@Component
+public class ValidateAndMessageItemProcessor implements ItemProcessor<VerificationSalesPlanDetail, SalesPlanDetail> {
+    /**
+     * Logger.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(ValidateAndMessageItemProcessor.class);
+
+    @Inject
+    Validator<VerificationSalesPlanDetail> validator;
+
+    @Inject
+    MessageSource messageSource;  // (1)
+
+    @Override
+    public SalesPlanDetail process(VerificationSalesPlanDetail item) throws Exception {
+        try {  // (2)
+            validator.validate(item);  // (3)
+        } catch (ValidationException e) {
+            // (4)
+            BindException errors = (BindException) e.getCause();
+
+            // (5)
+            for (FieldError fieldError : errors.getFieldErrors()) {
+                // (6)
+                logger.warn(messageSource.getMessage(fieldError, null) +
+                                "Skipping item because exception occurred in input validation at the {} th item. [message:{}]",
+                                    item.getCount(), e.getMessage());
+            // (7)
+            return null;  // skipping item
+        }
+
+        SalesPlanDetail salesPlanDetail = new SalesPlanDetail();
+        // omitted business logic
+
+        return salesPlanDetail;
+    }
+}
+----
+
+[cols="10,90", options="header"]
+.Item list of settings
+|===
+|Sr. no.
+|Description
+
+|(1)
+|Inject ``ResourceBundleMessageSource` instance. +
+For Bean definition of ``MassageSorce``, refer to <<Ch07_JobManagement.adoc#Ch07_JobManagement_HowToUse_MessageManagement,Message management>>.
+
+|(2)
+|Capture exception by try/catch.
+
+|(3)
+|Execute input validation.
+
+|(4)
+|Fetch ``org.springframework.validation.BindException`` by ``getCause()``.
+
+|(5)
+|Fetch ``FiledError`` for each error by ``getFieldErrors()``.
+
+|(6)
+|Consider the fetched ``FieldError`` as an argument and perform output process of error message by ``messageSource``. +
+When there is an error in 3 items in 1 record, output 3 error messages repeatedly.
+
+|(7)
+|By returning ``null``, it moves to the next data process by skipping the corresponding data.
+|===
