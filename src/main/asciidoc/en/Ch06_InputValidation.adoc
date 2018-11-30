@@ -205,7 +205,7 @@ Implement the DTO obtained through ``ItemReader`` as follows.
 * Define the input validation rule.
 ** refer to {server5_url}/ArchitectureInDetail/WebApplicationDetail/Validation.html[Input Validation] in {server5_guide}.
 
-Show an example of a DTO defining an input validation rule below.
+Below is an example of a DTO defining an input validation rule.
 
 [source,java]
 .An example of a DTO defining an input validation rule
@@ -519,4 +519,4 @@ public class ValidateAndContinueItemProcessor implements ItemProcessor<Verificat
 When an input validation error occurs, in order to distinguish between the case where input validation error did not occur and the state of the job, be sure to set an exit code that is not a normal termination. +
 If data with input validation error is skipped, setting of exit code is required even when abnormal termination occurs.
 
-For details on how to set the exit code, refer to <<Ch07_JobManagement.adoc#,Job Management>>.
+Refer to <<Ch07_JobManagement.adoc#,Job Management>> for details on how to set the exit code.
