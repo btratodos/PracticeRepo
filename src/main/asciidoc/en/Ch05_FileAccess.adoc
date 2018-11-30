@@ -1325,7 +1325,7 @@ public class SalesPlanFixedLengthFieldExtractor implements FieldExtractor<SalesP
         values[3] = fillUpSpace(item.getCustomerId(), 10);  // (4)
         values[4] = item.getAmount();
 
-        return values; // (7)
+        return values; // (8)
     }
 
     // It is a simple impl for example
@@ -1338,12 +1338,23 @@ public class SalesPlanFixedLengthFieldExtractor implements FieldExtractor<SalesP
             // omitted exception handling
         }
 
-        String fillStr = "";
-        for (int i = 0; i < (num - len); i++) { // (6)
-            fillStr += " ";
+        // (6)
+        if (len > num) {
+            throw new IncorrectFieldLengthException("The length of field is invalid. " + "[value:" + val + "][length:"
+                    + len + "][expect length:" + num + "]");
         }
 
-        return fillStr + val;
+        if (num == len) {
+            return val;
+        }
+
+        StringBuilder filledVal = new StringBuilder();
+        for (int i = 0; i < (num - len); i++) {  // (7)
+            filledVal.append(" ");
+        }
+        filledVal.append(val);
+
+        return filledVal.toString();
     }
 }
 ----
@@ -1372,11 +1383,14 @@ Refer to (5) and (6) for the details of format process.
 |Get the number of bytes for the character code.
 
 |(6)
-|Format the value by trimming or padding it according to be number of bytes. +
-In the implementation example, white space characters are added before the character string up to the specified number of bytes.
+|Throw an exception when the fetched number of bytes exceeds the maximum length.
 
 |(7)
-|Returns an array of Object type holding the processing result.
+|Format the value by trimming or padding it according to the fetched number of bytes. +
+In the implementation example, white space characters are added before the character string up to the specified number of bytes.
+
+|(8)
+Returns an array of Object type holding the processing result.
 |===
 
 [[Ch05_FileAccess_PathhThrough]]
