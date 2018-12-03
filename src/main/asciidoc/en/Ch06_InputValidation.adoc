@@ -519,7 +519,7 @@ public class ValidateAndContinueItemProcessor implements ItemProcessor<Verificat
 When an input validation error occurs, in order to distinguish between the case where input validation error did not occur and the state of the job, be sure to set an exit code that is not a normal termination. +
 If data with input validation error is skipped, setting of exit code is required even when abnormal termination occurs.
 
-Refer to <<Ch07_JobManagement.adoc#,Job Management>> for details on how to set the exit code.
+For details on how to set the exit code, refer to <<Ch07_JobManagement.adoc#,Job Management>>.
 
 [[Ch06_InputValidation_HowToUse_ErrorHandling_ErrorMessage]]
 ==== Output error messages
