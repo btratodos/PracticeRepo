@@ -434,6 +434,21 @@ Procedure will be same even when conventional Web application (Servlet/JSP) or S
 .Bean definition file to be added/deleted from a blank project
 image::Ch04_AsyncJobWithWebContainer_AppendBeanDefinitionsOnBlank.png[AppendBeanDefinitionsOnBlank]
 
+[cols="10,90", options="header"]
+.Bean definition file to be added/deleted
+|===
+
+|Sr. No.
+|Description
+
+|(1)
+|Delete spring-mvc.xml since it is not required because spring-mvc-rest.xml is created in (2).
+
+|(2)
+|Create spring-mvc-rest.xml for RESTful Web Service. Description example where definition is required is shown below.
+
+|===
+
 [source,xml]
 .Description example of asyncapp/asyncapp-web/src/main/resources/META-INF/spring/spring-mvc-rest.xml
 ----

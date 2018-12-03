@@ -426,7 +426,7 @@ async-batch-daemon.polling-stop-file-path=/tmp/end-async-batch-daemon
 It is auto-generated when Job-request-table does not exist at the time of starting asynchronous batch daemon. +
 This is primarily a test function and execution can be set by ``data-source.initialize.enabled`` of+
 ``batch-application.properties``. +
-For detailed definition, refer ``<jdbc:initialize-database>>`` in ``async-batch-daemon.xml``.
+For detailed definition, refer ``<jdbc:initialize-database>`` in ``async-batch-daemon.xml``.
 
 |(3)
 |Setting for records which are fetched collectively at the time of polling. This setup value is also used as a synchronous parallel number.
@@ -1036,6 +1036,54 @@ $ export GROUP_ID=G1
 $ java -cp dependency/* org.terasoluna.batch.async.db.AsyncBatchDaemon
 ----
 
+[[Ch04_AsyncJobWithDB_HowToExtend_ClockCustomize]]
+=== Clock customization used for timestamp
+The clock used for timestamp is fetched from ``systemDefaultZone`` by default. +
+However, when fetch conditions of job request of cancelling polling for a certain period of time, is to be extended to asynchronous batch daemon that depends on system date and time, specify specific date and time and implement the test using the time zone different from the system to be used. Therefore, in asynchronous execution, a function that can set customized clock as per the usage, is provided. +
+In default setting, when the request fetched from job request table is not customized, only ``update_date`` of job request table is affected when the clock is changed.
+
+Procedure to customize clock is as follows.
+
+.Create copy of ``async-batch-daemon.xml``
+.Change file name to ``customized-async-batch-daemon.xml``
+.Correct Bean definition of ``customized-async-batch-daemon.xml``
+.Launch the customized AsyncBatchDaemon +
+For details, refer to <<Ch04_AsyncJobWithDB_HowToUse_Daemon_Launch>>
+
+Setting example to fix date and time and change time zone is shown below.
+
+[source,xml]
+.META-INF/spring/customized-async-batch-daemon.xml
+----
+<bean id="jobRequestPollTask"
+      class="org.terasoluna.batch.async.db.JobRequestPollTask"
+      c:transactionManager-ref="adminTransactionManager"
+      c:jobOperator-ref="jobOperator"
+      c:batchJobRequestRepository-ref="batchJobRequestRepository"
+      c:daemonTaskExecutor-ref="daemonTaskExecutor"
+      c:automaticJobRegistrar-ref="automaticJobRegistrar"
+      p:clock-ref="clock" />　<!-- (1) -->
+
+<!-- (2) -->
+<bean id="clock" class="java.time.Clock" factory-method="fixed"
+      c:fixedInstant="#{T(java.time.ZonedDateTime).parse('2016-12-31T16:00-08:00[America/Los_Angeles]').toInstant()}"
+      c:zone="#{T(java.time.ZoneId).of('PST', T(java.time.ZoneId).SHORT_IDS)}"/>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Set Bean to be defined in (2) in ``clock`` property of ``JobRequestPollTask``.
+
+|(2)
+|Define Bean of ``java.time.Clock`` whose date and time is fixed to 31 December 2016 16:0:0 and time zone is Los Angeles time. +
+Time zone ID of Los Angeles time is ``PST``.
+|===
+
 [[Ch04_AsyncJobWithDB_HowToExtend_MultiDaemon]]
 === Multiple runnings
 Asynchronous batch daemon is run on multiple servers for the following purposes.
@@ -1059,7 +1107,6 @@ image::Ch04_AsyncJobWithDB_MultipleActivation.png[]
 Since ``JobRequestPollTask`` performs exclusive control using optimistic locking, it can execute the job of the record fetched by asynchronous batch daemon which can update the polling status from INIT to POLLED.
 Other exclusive asynchronous batch daemons fetch next job request record.
 ====
-
 
 [[Ch04_AsyncJobWithDB_Appendix]]
 == Appendix

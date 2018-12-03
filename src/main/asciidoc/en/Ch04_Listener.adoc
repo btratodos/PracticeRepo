@@ -524,3 +524,90 @@ Listener interface::
 Annotation::
   It is used when business logic specific process is to be performed. +
   As a rule, it is implemented only for ItemProcessor.
+  
+[[Ch04_Listener_HowToUse_JobAbort]]
+=== Job abort in pre-processing(StepExecutionListener#beforeStep())
+When the conditions for executing the job are not satisfied, you may want to abort the process before executing the job.
+
+In such a case, the process can be aborted before job execution by throwing an exception in pre-processing (``beforeStep`` method). +
+The case of where the following requirements are implemented is explained with the help of an example here.
+
+. Verify the validity of start parameters of input and output files by ``beforeStep`` method defined by ``StepExecutionListener``. +
+. Throw an exception if any of the start parameters is not specified.
+
+However, in {batch5_shortname}, it is recommended to use ``JobParametersValidator`` for verifying the validity of start parameters.
+Refer to <<Ch04_JobParameter.adoc#Ch04_JobParameter_HowToUse_ParamsValidation,"Verification of validity of parameters">> for verifying the validity of start parameters since easy to understand validity verification is used till the end as a sample for discontinuing pre-processing here.
+
+Implementation example is shown below.
+
+[source,java]
+.Implementation example of StepExecutionListener that performs validity verification of start parameters
+----
+@Component
+@Scope("step")
+public class CheckingJobParameterErrorStepExecutionListener implements StepExecutionListener {
+
+    @Value("#{jobParameters['inputFile']}") // (1)
+    private File inputFile;
+
+    @Value("#{jobParameters['outputFile']}") // (1)
+    private File outputFile;
+
+    @Override
+    public void beforeStep(StepExecution stepExecution) {
+        if (inputFile == null) {
+            throw new BeforeStepException("The input file must be not null."); // (2)
+        }
+        else if (outputFile == null) {
+            throw new BeforeStepException("The output file must be not null."); // (2)
+        }
+    }
+
+    @Override
+    public ExitStatus afterStep(StepExecution stepExecution) {
+        // omitted.
+    }
+}
+----
+
+[source,xml]
+.Setting example of listener
+----
+<bean id="reader" class="org.terasoluna.batch.functionaltest.ch04.listener.LoggingReader" scope="step"
+      p:resource="file:#{jobParameters['inputFile']}"/> <!-- (3) -->
+<bean id="writer" class="org.terasoluna.batch.functionaltest.ch04.listener.LoggingWriter" scope="step"
+      p:resource="file:#{jobParameters['outputFile']}"/> <!-- (3) -->
+
+<batch:job id="chunkJobWithAbortListener" job-repository="jobRepository">
+    <batch:step id="chunkJobWithAbortListener.step01">
+        <batch:tasklet transaction-manager="jobTransactionManager">
+            <batch:chunk reader="reader" writer="writer" commit-interval="10"/>
+        </batch:tasklet>
+        <batch:listeners>
+            <batch:listener ref="checkingJobParameterErrorStepExecutionListener"/> <!-- (4) -->
+        </batch:listeners>
+    </batch:step>
+</batch:job>
+----
+
+[cols="10,90", options="header"]
+.Description
+|===
+|Sr. No.
+|Description
+
+|(1)
+|Specify the parameter to be referred using @Value annotation.
+
+|(2)
+|Throw an exception. +
+In this example, own exception class is used by inheriting ``RuntimeException``.
+
+|(3)
+|Specify the parameter to be referred. +
+The class that sets parameter is a unique class implementing ``ItemStreamReader`` and ``ItemStreamWriter`` respectively.
+
+|(4)
+|Set listener interface implementation.
+
+|===
