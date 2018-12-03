@@ -702,7 +702,7 @@ public class OptimisticLockTasklet implements Tasklet {
         exclusiveBranch.setBranchAddress(branch.getBranchAddress() + " - " + identifier);
         exclusiveBranch.setBranchTel(branch.getBranchTel());
         exclusiveBranch.setCreateDate(branch.getUpdateDate());
-        exclusiveBranch.setUpdateDate(new Timestamp(System.currentTimeMillis()));
+        exclusiveBranch.setUpdateDate(new Timestamp(Clock.systemDefaultZone().millis()));
         exclusiveBranch.setOldBranchName(branch.getBranchName());
 
         int result = repository.branchExclusiveUpdate(exclusiveBranch); // (3)
