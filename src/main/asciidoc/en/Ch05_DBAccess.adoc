@@ -411,6 +411,9 @@ public interface CustomerRepository {
 
 |===
 
+[WARNING]
+.MyBatisCursorItemReaderにおけるクローズ時の注意事項について
+
 [[Ch05_DBAccess_HowToUse_Output]]
 === Database Access with ItemWriter
 Explain database access with ItemWriter in here.
